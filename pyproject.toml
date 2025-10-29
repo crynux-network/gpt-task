@@ -9,7 +9,7 @@ description = "A general framework to define and execute the GPT text generation
 readme = "README.md"
 requires-python = ">=3.7"
 classifiers = ["Programming Language :: Python :: 3"]
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
     "numpy",
     "scipy",

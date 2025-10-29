@@ -128,6 +128,7 @@ class TokenStreamer(BaseStreamer):
                 }],
                 "usage": self.get_usage()
             }
+            _logger.info(f"task response: {response}")
             self.stream_callback(response)
 
     def get_finish_reason(self) -> Literal["stop", "length"]:
@@ -186,7 +187,7 @@ def run_task(
         )
 
     _logger.info("Task starts")
-    _logger.debug(f"task args: {args}")
+    _logger.info(f"task args: {args}")
 
     use_deterministic_mode()
 
@@ -219,9 +220,16 @@ def run_task(
         )
 
         if args.quantize_bits == 4:
-            model_kwargs["load_in_4bit"] = True
+            from transformers import BitsAndBytesConfig
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True
+            )
         elif args.quantize_bits == 8:
-            model_kwargs["load_in_8bit"] = True
+            from transformers import BitsAndBytesConfig
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_enable_fp32_cpu_offload=True
+            )
 
         pipe = pipeline(
             "text-generation",
@@ -248,6 +256,7 @@ def run_task(
         pipe = model_loader()
 
     tokenizer = pipe.tokenizer
+    assert tokenizer is not None
 
     _logger.info("Start text generation")
 
@@ -274,7 +283,7 @@ def run_task(
         args.tools = None  # Disable tools since they won't work
 
     if has_chat_template:
-        template_args = {
+        template_args: Dict[str, Any] = {
             "tokenize": False,
             "add_generation_prompt": True
         }
@@ -384,5 +393,6 @@ def run_task(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
+    _logger.info(f"task response: {resp}")
     _logger.info("Text generation completes")
     return resp

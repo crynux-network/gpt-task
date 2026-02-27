@@ -123,7 +123,7 @@ def process_conversation_streaming(messages: List[Dict[str, str]], tools: List[D
 
     try:
         run_task(
-            model="NousResearch/Hermes-2-Pro-Llama-3-8B",
+            model="Qwen/Qwen3-8B",
             messages=conversation_history,
             tools=tools,
             stream_callback=stream_callback,
@@ -181,7 +181,7 @@ def process_conversation_streaming(messages: List[Dict[str, str]], tools: List[D
             current_session_usage = None
 
             run_task(
-                model="NousResearch/Hermes-2-Pro-Llama-3-8B",
+                model="Qwen/Qwen3-8B",
                 messages=conversation_history,
                 stream_callback=stream_callback,
                 generation_config={

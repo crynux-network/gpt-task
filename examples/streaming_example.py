@@ -47,7 +47,7 @@ try:
             usage = chunk_usage
 
     run_task(
-        model="mistralai/Mistral-7B-Instruct-v0.1",
+        model="Qwen/Qwen3-8B",
         messages=messages,
         stream_callback=stream_callback,
         generation_config={

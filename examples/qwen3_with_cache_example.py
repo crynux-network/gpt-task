@@ -23,7 +23,7 @@ all_messages = [
 
 for messages in all_messages:
     res = run_task(
-        model="gpt2",
+        model="Qwen/Qwen3-8B",
         messages=messages,
         seed=42,
         model_cache=cache,

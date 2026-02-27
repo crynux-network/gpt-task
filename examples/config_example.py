@@ -16,7 +16,7 @@ messages = [
 
 
 res = run_task(
-    model="gpt2",
+    model="Qwen/Qwen3-8B",
     messages=messages,
     seed=42,
     config=Config(

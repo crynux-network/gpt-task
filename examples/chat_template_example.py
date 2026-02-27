@@ -16,7 +16,7 @@ messages = [
 
 
 res = run_task(
-    model="mistralai/Mistral-7B-Instruct-v0.1",
+    model="Qwen/Qwen3-8B",
     messages=messages,
     seed=42,
     quantize_bits=4,

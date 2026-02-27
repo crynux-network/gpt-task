@@ -50,6 +50,7 @@ class GPTTaskArgs(BaseModel):
     messages: List[Message]
     tools: Optional[List[Dict[str, Any]]] = None
     generation_config: Optional[GPTGenerationConfig] = None
+    template_args: Optional[Dict[str, Any]] = None
 
     seed: int = 0
     dtype: Literal["float16", "bfloat16", "float32", "auto"] = "auto"

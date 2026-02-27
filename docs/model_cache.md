@@ -39,6 +39,8 @@ Two calls with the same model name but different dtypes or quantization will pro
 
 When `model_cache` is `None`, the loader is called directly every time.
 
+The prompt rendering step in `run_task()` executes after the pipeline is loaded. The cache contract remains unchanged because cache keys continue to depend only on `model`, `dtype`, and `quantize_bits`.
+
 ## Usage
 
-See `examples/gpt2_with_cache_example.py` for a complete example. The key pattern is: create a single `MemoryModelCache` instance and pass it to every `run_task()` call. The first call loads the model; subsequent calls reuse the cached pipeline.
+See `examples/qwen3_with_cache_example.py` for a complete cache example. The key pattern is: create a single `MemoryModelCache` instance and pass it to every `run_task()` call. The first call loads the model; subsequent calls reuse the cached pipeline.

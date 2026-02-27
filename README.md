@@ -15,7 +15,7 @@ A general framework to define and execute the llm text generation task.
 
 ### Example
 
-Here is an example of the gpt2 text generation:
+Here is an example of Qwen3-8B text generation:
 
 ```python
 import logging
@@ -33,7 +33,7 @@ messages = [{"role": "user", "content": "I want to create a chat bot. Any sugges
 
 
 res = run_task(
-    model="gpt2",
+    model="Qwen/Qwen3-8B",
     messages=messages,
     seed=42,
 )
@@ -56,7 +56,7 @@ Install the dependencies and the library:
 
 Check and run the examples:
 ```shell
-(venv) $ python ./examples/gpt2_example.py
+(venv) $ python ./examples/qwen_example.py
 ```
 
 More explanations can be found in the doc:

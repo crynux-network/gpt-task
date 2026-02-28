@@ -30,6 +30,8 @@ Intermediate chunks MUST set `finish_reason=null`. The terminal chunk MUST set `
 
 Prompt token counting MUST be derived from prompt-boundary detection against generated token sequences and MUST stay aligned with non-streaming semantics.
 
+For multimodal requests (image blocks in canonical input), prompt token baseline MUST be derived from the normalized text view of canonical content so streaming and non-streaming usage counters stay parity-compatible within one runtime contract.
+
 Completion token counting MUST increment only for generated assistant tokens after prompt boundary resolution.
 
 Total tokens MUST equal:
@@ -48,6 +50,7 @@ The final chunk MUST always contain a terminal `finish_reason`.
 ## Prompt Rendering Coexistence
 
 Streaming MUST consume rendered prompts exactly as non-streaming does.
+For multimodal requests, streaming MUST consume the same HF chat-message mapping as non-streaming.
 
 Prompt rendering is input-only and MUST NOT perform output parsing in either streaming or non-streaming paths. Rendering integration MUST NOT alter streaming chunk shape or usage semantics.
 

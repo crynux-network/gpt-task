@@ -13,6 +13,8 @@ The project targets maximum generality while keeping scope intentionally narrow.
 
 1. Input is the compatibility boundary
    - This project solves input normalization and prompt rendering compatibility.
+   - The canonical message contract accepts `content` as either a legacy string or a block list.
+   - Image blocks in canonical content use base64 source only.
    - It does not solve output structuring/parsing for downstream consumers.
 
 2. Output stays raw and transport-stable
@@ -31,7 +33,7 @@ The project targets maximum generality while keeping scope intentionally narrow.
      - `src/gpt_task/inference/inference.py`
 
 2. Prompt rendering layer
-   - Converts unified task input into model-ready prompt text.
+   - Converts unified task input into model-ready prompt text or HF chat message blocks.
    - Receives `template_args` as input-side extension arguments.
    - Related docs:
      - `docs/prompt_format_compatibility.md`
@@ -45,6 +47,7 @@ The project targets maximum generality while keeping scope intentionally narrow.
 
 3. Generation and streaming runtime
    - Executes model inference, streaming callbacks, finish reasons, and usage accounting.
+   - Uses one model-capability-driven flow: `AutoProcessor.from_pretrained(...)` + `pipeline(task=None, ...)`.
    - Related docs:
      - `docs/streaming_design.md`
      - `docs/model_cache.md`
@@ -61,8 +64,8 @@ The project targets maximum generality while keeping scope intentionally narrow.
 ## Implementation Path
 
 1. `run_task()` validates/binds input into `GPTTaskArgs`.
-2. Prompt-rendering layer resolves a renderer and returns prompt text.
-3. Runtime executes generation (streaming or non-streaming).
+2. Prompt-rendering layer resolves either prompt text (LLM path) or HF chat blocks (VLM path).
+3. Runtime executes generation with a single auto-dispatch pipeline (streaming or non-streaming).
 4. Response assembly returns raw decoded text in assistant content.
 
 ## File Navigation Map

@@ -1,19 +1,20 @@
 ## GPT Task
 
-A general framework to define and execute the llm text generation task.
+A unified framework to define and execute LLM and VLM generation tasks.
 
 
 ### Features
 
-* Unified task definition for various different large language model
-* Apply model specific chat templates to input prompts automatically
+* Unified `run_task` entrypoint for both text-only and multimodal models
+* Block-based chat messages with text and image content
+* Base64-only image input for multimodal requests
+* Streaming callback support with stable ChatGPT-style response shape
 * Model quantizing (INT4 or INT8)
-* Fine grained control text generation arguments
-* ChatGPT style response
-* **RTX 50 series Support** - Now supports NVIDIA RTX 50 series graphics cards
+* Fine-grained generation argument control
+* **RTX 50 series Support** - supports NVIDIA RTX 50 series graphics cards
 
 
-### Example
+### Example (LLM)
 
 Here is an example of Qwen3-8B text generation:
 
@@ -40,6 +41,35 @@ res = run_task(
 print(res)
 ```
 
+### Example (VLM)
+
+```python
+import base64
+from pathlib import Path
+from gpt_task.inference import run_task
+
+image_path = Path("./examples/test.png")
+image_base64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
+
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What is in this image?"},
+            {"type": "image", "base64": image_base64},
+        ],
+    }
+]
+
+res = run_task(
+    model="Qwen/Qwen2.5-VL-3B-Instruct",
+    messages=messages,
+    seed=42,
+    dtype="float16",
+)
+print(res)
+```
+
 
 ### Get started
 
@@ -56,7 +86,10 @@ Install the dependencies and the library:
 
 Check and run the examples:
 ```shell
-(venv) $ python ./examples/qwen_example.py
+(venv) $ python ./examples/qwen2.5_example.py
+(venv) $ python ./examples/qwen2_5_vl_3b_example.py
+(venv) $ python ./examples/internvl3_2b_example.py
+(venv) $ python ./examples/smolvlm_instruct_example.py
 ```
 
 More explanations can be found in the doc:

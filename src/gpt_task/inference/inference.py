@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any, Dict, List, Literal, Mapping, Sequence, Union, Callable
 
@@ -15,6 +16,7 @@ from gpt_task.cache import ModelCache
 from .errors import wrap_error
 from .utils import load_model_kwargs, use_deterministic_mode
 from .key import generate_model_key
+from .prompt_adapters import resolve_adapter
 
 _logger = logging.getLogger(__name__)
 
@@ -166,6 +168,7 @@ def run_task(
     messages: Sequence[models.Message | Mapping[str, Any]] | None = None,
     tools: Sequence[Dict[str, Any]] | None = None,
     generation_config: models.GPTGenerationConfig | Mapping[str, Any] | None = None,
+    template_args: Mapping[str, Any] | None = None,
     stream_callback: Callable[[models.GPTTaskStreamResponse], None] | None = None,
     seed: int = 0,
     dtype: Literal["float16", "bfloat16", "float32", "auto"] = "auto",
@@ -180,6 +183,7 @@ def run_task(
                 "messages": messages,
                 "tools": tools,
                 "generation_config": generation_config,
+                "template_args": template_args,
                 "seed": seed,
                 "dtype": dtype,
                 "quantize_bits": quantize_bits,
@@ -239,7 +243,7 @@ def run_task(
             trust_remote_code=True,
             use_fast=False,
             device_map="auto",
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
             model_kwargs=dict(
                 offload_folder="offload",
                 offload_state_dict=True,
@@ -260,7 +264,7 @@ def run_task(
 
     _logger.info("Start text generation")
 
-    generation_config = {"num_return_sequences": 1, "max_new_tokens": 256}
+    generation_kwargs = {"num_return_sequences": 1, "max_new_tokens": 256}
     if args.generation_config is not None:
         customer_config = TypeAdapter(models.GPTGenerationConfig).dump_python(
             args.generation_config,
@@ -269,36 +273,19 @@ def run_task(
         )
         for k, v in customer_config.items():
             if v is not None:
-                generation_config[k] = v
+                generation_kwargs[k] = v
 
-    chats = [dict(**m) for m in args.messages]
+    resolved_generation_config = copy.deepcopy(pipe.model.generation_config)
+    for k, v in generation_kwargs.items():
+        setattr(resolved_generation_config, k, v)
+    if resolved_generation_config.max_new_tokens is not None:
+        # Avoid transformers warning caused by default max_length=20.
+        resolved_generation_config.max_length = None
 
-    # Check if model supports chat templates
-    has_chat_template = hasattr(tokenizer, "chat_template") and tokenizer.chat_template is not None
-    _logger.debug(f"Model has chat template: {has_chat_template}")
+    adapter = resolve_adapter(args.model, tokenizer)
+    inputs = adapter.render_input(args, tokenizer)
 
-    # Warn if tools are requested but model doesn't support them
-    if args.tools and not has_chat_template:
-        _logger.warning("Tools were provided but model does not support chat template. Tool calling will be disabled.")
-        args.tools = None  # Disable tools since they won't work
-
-    if has_chat_template:
-        template_args: Dict[str, Any] = {
-            "tokenize": False,
-            "add_generation_prompt": True
-        }
-
-        if args.tools is not None:
-            template_args["tools"] = [dict(**t) for t in args.tools]
-            _logger.debug(f"Adding tools to chat template: {template_args['tools']}")
-
-        inputs = tokenizer.apply_chat_template(chats,**template_args)
-        _logger.debug("Applied chat template for input formatting")
-    else:
-        _logger.debug("No chat template available, falling back to basic formatting")
-        inputs = "\n".join(c["content"] for c in chats)
-
-    _logger.debug(f"Generation config: {generation_config}")
+    _logger.debug(f"Generation config: {resolved_generation_config}")
     _logger.debug(f"Input text: {inputs}")
 
     input_tokens = tokenizer.encode(inputs, add_special_tokens=False)
@@ -306,13 +293,15 @@ def run_task(
     if stream_callback is not None:
         # Create a callback-based streamer
         streamer = TokenStreamer(tokenizer, input_tokens, args.model, stream_callback)
-        generation_config["streamer"] = streamer
-        generation_config["pad_token_id"] = tokenizer.eos_token_id
-        generation_config["use_cache"] = True
+        stream_kwargs = {
+            "streamer": streamer,
+            "pad_token_id": tokenizer.eos_token_id,
+            "use_cache": True,
+        }
 
         # Run the pipe function directly - it will call the streamer's put method
         # which will in turn call the stream_callback for each token
-        pipe(inputs, **generation_config)
+        pipe(inputs, generation_config=resolved_generation_config, **stream_kwargs)
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -325,7 +314,7 @@ def run_task(
     output = pipe(
         inputs,
         return_tensors=True,
-        **generation_config,
+        generation_config=resolved_generation_config,
     )
     assert output is not None
     assert isinstance(output, list)
@@ -373,14 +362,15 @@ def run_task(
         "total_tokens": prompt_tokens + completion_tokens,
     }
 
-    choices: List[models.ResponseChoice] = [
-        {
-            "finish_reason": reason,
-            "message": {"role": "assistant", "content": text},
-            "index": i,
-        }
-        for i, (reason, text) in enumerate(zip(finish_reasons, output_texts))
-    ]
+    choices: List[models.ResponseChoice] = []
+    for i, (reason, text) in enumerate(zip(finish_reasons, output_texts)):
+        choices.append(
+            {
+                "finish_reason": reason,
+                "message": {"role": "assistant", "content": text},
+                "index": i,
+            }
+        )
 
     resp: models.GPTTaskResponse = {
         "model": args.model,

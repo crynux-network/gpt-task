@@ -98,13 +98,14 @@ def process_conversation(messages: List[Dict[str, str]], tools: List[Dict[str, A
 
     while True:
         response = run_task(
-            model="NousResearch/Hermes-2-Pro-Llama-3-8B",
+            model="Qwen/Qwen3-8B",
             messages=conversation_history,
             tools=tools,
             generation_config={
                 "repetition_penalty": 1.1,
                 "do_sample": True,
                 "temperature": 0.7,
+                "max_new_tokens": 32768,
             },
             seed=42424422,
             dtype="float16",

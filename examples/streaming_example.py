@@ -47,14 +47,14 @@ try:
             usage = chunk_usage
 
     run_task(
-        model="mistralai/Mistral-7B-Instruct-v0.1",
+        model="Qwen/Qwen3-8B",
         messages=messages,
         stream_callback=stream_callback,
         generation_config={
             "repetition_penalty": 1.1,
             "do_sample": True,
             "temperature": 0.7,
-            "max_new_tokens": 100
+            "max_new_tokens": 32768
         },
         seed=42,
         dtype="float16"

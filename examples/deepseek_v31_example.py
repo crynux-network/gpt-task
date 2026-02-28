@@ -1,6 +1,11 @@
 import logging
 
+import dotenv
+
 from gpt_task.inference import run_task
+
+dotenv.load_dotenv()
+
 
 logging.basicConfig(
     format="[{asctime}] [{levelname:<8}] {name}: {message}",
@@ -9,21 +14,15 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-messages = [
-    {"role": "user", "content": "I want to create a chat bot. Any suggestions?"}
-]
+messages = [{"role": "user", "content": "I want to create a chat bot. Any suggestions?"}]
 
 
 res = run_task(
-    model="THUDM/chatglm3-6b",
+    model="deepseek-ai/DeepSeek-V3.1",
     messages=messages,
-    generation_config={
-        "repetition_penalty": 1.1,
-        "do_sample": True,
-        "temperature": 0.3,
-    },
+    generation_config={"max_new_tokens": 32768},
+    template_args={"thinking": True},
     seed=42,
     dtype="float16",
-    quantize_bits=4,
 )
 print(res)

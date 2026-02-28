@@ -1,4 +1,6 @@
 .vscode
+.cursor
+.models
 
 *venv
 .idea/

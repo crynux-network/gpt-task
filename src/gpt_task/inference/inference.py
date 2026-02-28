@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Literal, Mapping, Sequence, Union, Callable
 
 import torch
 from pydantic import TypeAdapter
-from transformers import AutoConfig, AutoTokenizer, pipeline, set_seed
+from transformers import AutoProcessor, pipeline, set_seed
 from transformers.generation.streamers import BaseStreamer
 
 from gpt_task import models
@@ -17,6 +17,7 @@ from .errors import wrap_error
 from .utils import load_model_kwargs, use_deterministic_mode
 from .key import generate_model_key
 from .prompt_adapters import resolve_adapter
+from .prompt_adapters.utils import contains_image_blocks, content_to_text, to_hf_chat_messages
 
 _logger = logging.getLogger(__name__)
 
@@ -160,6 +161,50 @@ def _find_prompt_tokens(input_tokens: List[int], output_tokens: List[int]) -> in
         return 0
 
 
+def _resolve_pipeline_tokenizer(pipe: Any) -> Any:
+    tokenizer = getattr(pipe, "tokenizer", None)
+    if tokenizer is not None:
+        return tokenizer
+
+    processor = getattr(pipe, "processor", None)
+    if processor is not None:
+        processor_tokenizer = getattr(processor, "tokenizer", None)
+        if processor_tokenizer is not None:
+            return processor_tokenizer
+
+    raise RuntimeError("Failed to resolve tokenizer from pipeline.")
+
+
+def _build_prompt_token_baseline(
+    tokenizer: Any,
+    inputs: Union[str, List[Dict[str, Any]]],
+    messages: Sequence[models.Message],
+) -> List[int]:
+    if isinstance(inputs, str):
+        return tokenizer.encode(inputs, add_special_tokens=False)
+
+    text_prompt = "\n".join(content_to_text(message.get("content")) for message in messages)
+    return tokenizer.encode(text_prompt, add_special_tokens=False)
+
+
+def _extract_generated_text(generated: Any) -> str:
+    if isinstance(generated, str):
+        return generated
+    if isinstance(generated, list):
+        if len(generated) == 0:
+            return ""
+        last = generated[-1]
+        if isinstance(last, dict):
+            content = last.get("content")
+            if isinstance(content, str):
+                return content
+    if isinstance(generated, dict):
+        content = generated.get("content")
+        if isinstance(content, str):
+            return content
+    return ""
+
+
 @wrap_error
 def run_task(
     args: models.GPTTaskArgs | None = None,
@@ -213,14 +258,8 @@ def run_task(
         model_kwargs = load_model_kwargs(config=config)
         _logger.debug(f"model kwargs: {model_kwargs}")
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.model, use_fast=False, trust_remote_code=True, **model_kwargs
-        )
-        model_config = AutoConfig.from_pretrained(
-            args.model,
-            _from_pipeline="text-generation",
-            trust_remote_code=True,
-            **model_kwargs,
+        processor = AutoProcessor.from_pretrained(
+            args.model, trust_remote_code=True, **model_kwargs
         )
 
         if args.quantize_bits == 4:
@@ -236,12 +275,10 @@ def run_task(
             )
 
         pipe = pipeline(
-            "text-generation",
+            task=None,
             model=args.model,
-            config=model_config,
-            tokenizer=tokenizer,
+            processor=processor,
             trust_remote_code=True,
-            use_fast=False,
             device_map="auto",
             dtype=torch_dtype,
             model_kwargs=dict(
@@ -259,7 +296,7 @@ def run_task(
     else:
         pipe = model_loader()
 
-    tokenizer = pipe.tokenizer
+    tokenizer = _resolve_pipeline_tokenizer(pipe)
     assert tokenizer is not None
 
     _logger.info("Start text generation")
@@ -282,13 +319,17 @@ def run_task(
         # Avoid transformers warning caused by default max_length=20.
         resolved_generation_config.max_length = None
 
-    adapter = resolve_adapter(args.model, tokenizer)
-    inputs = adapter.render_input(args, tokenizer)
+    has_image_input = contains_image_blocks(args.messages)
+    if has_image_input:
+        inputs: Union[str, List[Dict[str, Any]]] = to_hf_chat_messages(args.messages)
+    else:
+        adapter = resolve_adapter(args.model, tokenizer)
+        inputs = adapter.render_input(args, tokenizer)
 
     _logger.debug(f"Generation config: {resolved_generation_config}")
     _logger.debug(f"Input text: {inputs}")
 
-    input_tokens = tokenizer.encode(inputs, add_special_tokens=False)
+    input_tokens = _build_prompt_token_baseline(tokenizer, inputs, args.messages)
 
     if stream_callback is not None:
         # Create a callback-based streamer
@@ -321,40 +362,61 @@ def run_task(
 
     _logger.debug(f"Raw output: {output}")
 
-    res_token_ids = []
+    generations: List[Dict[str, Any]] = []
     for single in output:
         assert isinstance(single, dict)
-        res_token_ids.append(single["generated_token_ids"])
+        token_ids = single.get("generated_token_ids")
+        generated_text = _extract_generated_text(single.get("generated_text"))
+        generations.append(
+            {
+                "token_ids": token_ids if isinstance(token_ids, list) else None,
+                "generated_text": generated_text,
+            }
+        )
 
-    assert len(res_token_ids) > 0
+    assert len(generations) > 0
 
     del output
 
-    prompt_tokens = _find_prompt_tokens(input_tokens, res_token_ids[0])
+    prompt_tokens = len(input_tokens)
+    first_generation_tokens = generations[0].get("token_ids")
+    if isinstance(first_generation_tokens, list):
+        detected_prompt_tokens = _find_prompt_tokens(input_tokens, first_generation_tokens)
+        if detected_prompt_tokens > 0:
+            prompt_tokens = detected_prompt_tokens
 
     del input_tokens
 
     completion_tokens = 0
-    output_texts = []
+    output_texts: List[str] = []
     finish_reasons = []
 
-    for token_ids in res_token_ids:
-        # when the last token is eos token, finish reason is stop, otherwise is length
-        if token_ids[-1] == tokenizer.eos_token_id:
-            finish_reason = "stop"
+    for generation in generations:
+        token_ids = generation.get("token_ids")
+        generated_text = generation.get("generated_text", "")
+        if isinstance(token_ids, list):
+            # when the last token is eos token, finish reason is stop, otherwise is length
+            if token_ids[-1] == tokenizer.eos_token_id:
+                finish_reason = "stop"
+            else:
+                finish_reason = "length"
+            finish_reasons.append(finish_reason)
+
+            completion_tokens += max(len(token_ids) - prompt_tokens, 0)
+
+            text = tokenizer.decode(
+                token_ids[prompt_tokens:],
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=True,
+            ).strip()
+
+            output_texts.append(text)
         else:
-            finish_reason = "length"
-        finish_reasons.append(finish_reason)
-
-        completion_tokens += len(token_ids) - prompt_tokens
-
-        text = tokenizer.decode(
-            token_ids[prompt_tokens:],
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=True,
-        ).strip()
-
-        output_texts.append(text)
+            finish_reasons.append("length")
+            completion_tokens += len(
+                tokenizer.encode(generated_text, add_special_tokens=False)
+            )
+            output_texts.append(generated_text.strip())
 
     usage: models.Usage = {
         "prompt_tokens": prompt_tokens,
@@ -378,7 +440,7 @@ def run_task(
         "usage": usage,
     }
 
-    del res_token_ids
+    del generations
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

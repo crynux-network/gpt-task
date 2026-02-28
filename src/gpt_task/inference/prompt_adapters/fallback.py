@@ -5,6 +5,8 @@ from typing import Any
 
 from gpt_task import models
 
+from .utils import content_to_text
+
 _logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,4 @@ class FallbackPromptAdapter:
                 args.model,
             )
 
-        return "\n".join(
-            str(message.get("content", "")) for message in args.messages if message.get("content")
-        )
+        return "\n".join(content_to_text(message.get("content")) for message in args.messages)

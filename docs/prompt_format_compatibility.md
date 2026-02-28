@@ -13,13 +13,16 @@ The compatibility layer MUST accept the unified `GPTTaskArgs` contract with:
 - `tools` (optional)
 - `template_args` (optional raw passthrough map)
 
-The compatibility layer MUST render a single generation prompt string for generation.
+`messages[].content` MUST support:
+
+- Legacy string content.
+- Block-list content with HF-compatible blocks:
+  - Text block: `{ "type": "text", "text": "<text>" }`
+  - Image block: `{ "type": "image", "base64": "<base64>" }`
 
 ## Adapter Contract
 
-Each adapter MUST implement:
-
-- Input rendering from unified messages/tools into model-compatible prompt text.
+Each adapter MUST implement input rendering from unified messages/tools into model-compatible prompt text.
 
 Adapters MUST be registered through a central registry. The registry MUST resolve one adapter per request, based on model-family matching rules.
 
@@ -63,14 +66,22 @@ The DeepSeek adapter accepts `template_args` as a compatibility surface and norm
 - This adapter MUST be used only when no explicit family adapter matches and `tokenizer.chat_template` exists.
 - It MUST preserve tool rendering through template arguments when `tools` is provided.
 - It MUST pass `template_args` through as raw keyword arguments to `tokenizer.apply_chat_template(...)`.
+- For block-list content without images, it MUST normalize blocks to text before applying chat templates.
 - Unknown keys MAY be ignored by the underlying tokenizer template implementation.
 
 ### Generic Fallback Adapter
 
 - This adapter MUST be used only when no explicit family adapter matches and tokenizer-template rendering is unavailable.
-- It MUST render prompts via plain message-content concatenation.
+- It MUST render prompts via plain message-content concatenation after block-to-text normalization.
 - It MUST ignore `tools` and `template_args` with explicit warnings.
 - It MUST remain reserved for future non-target model families.
+
+## HF Message Mapping For VLM
+
+When any canonical message contains image blocks, the runtime MUST bypass text-only adapter rendering and MUST map canonical blocks to HF chat-template message structures:
+
+- Text block -> `{ "type": "text", "text": ... }`
+- Image block -> `{ "type": "image", "base64": ... }`
 
 ## Template Args Semantics
 

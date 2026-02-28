@@ -54,7 +54,7 @@ try:
             "repetition_penalty": 1.1,
             "do_sample": True,
             "temperature": 0.7,
-            "max_new_tokens": 100
+            "max_new_tokens": 32768
         },
         seed=42,
         dtype="float16"

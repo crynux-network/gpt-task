@@ -1,7 +1,10 @@
 import logging
+import dotenv
 
 from gpt_task.config import Config, ProxyConfig, DataDirConfig, ModelsDirConfig
 from gpt_task.inference import run_task
+
+dotenv.load_dotenv()
 
 logging.basicConfig(
     format="[{asctime}] [{levelname:<8}] {name}: {message}",
@@ -18,6 +21,7 @@ messages = [
 res = run_task(
     model="Qwen/Qwen3-8B",
     messages=messages,
+    generation_config={"max_new_tokens": 32768},
     seed=42,
     config=Config(
         data_dir=DataDirConfig(models=ModelsDirConfig(huggingface=".cache")),

@@ -1,8 +1,10 @@
 import logging
 import time
+
 import dotenv
-from gpt_task.inference import run_task
+
 from gpt_task.cache import MemoryModelCache
+from gpt_task.inference import run_task
 
 dotenv.load_dotenv()
 
@@ -16,7 +18,6 @@ logging.basicConfig(
 
 cache = MemoryModelCache()
 
-
 all_messages = [
     [{"role": "user", "content": "I want to create a chat bot. Any suggestions?"}],
     [{"role": "user", "content": "What is the highest mountain in the world?"}],
@@ -24,14 +25,13 @@ all_messages = [
     [{"role": "user", "content": "It's raining today."}],
 ]
 
-
 total_start = time.perf_counter()
 
 for index, messages in enumerate(all_messages, start=1):
     step_start = time.perf_counter()
 
     res = run_task(
-        model="Qwen/Qwen3-8B",
+        model="Qwen/Qwen2.5-7B-Instruct",
         messages=messages,
         generation_config={"max_new_tokens": 32768},
         seed=42,

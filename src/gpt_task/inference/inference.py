@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any, Dict, List, Literal, Mapping, Sequence, Union, Callable
 
@@ -242,7 +243,7 @@ def run_task(
             trust_remote_code=True,
             use_fast=False,
             device_map="auto",
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
             model_kwargs=dict(
                 offload_folder="offload",
                 offload_state_dict=True,
@@ -263,7 +264,7 @@ def run_task(
 
     _logger.info("Start text generation")
 
-    generation_config = {"num_return_sequences": 1, "max_new_tokens": 256}
+    generation_kwargs = {"num_return_sequences": 1, "max_new_tokens": 256}
     if args.generation_config is not None:
         customer_config = TypeAdapter(models.GPTGenerationConfig).dump_python(
             args.generation_config,
@@ -272,12 +273,19 @@ def run_task(
         )
         for k, v in customer_config.items():
             if v is not None:
-                generation_config[k] = v
+                generation_kwargs[k] = v
+
+    resolved_generation_config = copy.deepcopy(pipe.model.generation_config)
+    for k, v in generation_kwargs.items():
+        setattr(resolved_generation_config, k, v)
+    if resolved_generation_config.max_new_tokens is not None:
+        # Avoid transformers warning caused by default max_length=20.
+        resolved_generation_config.max_length = None
 
     adapter = resolve_adapter(args.model, tokenizer)
     inputs = adapter.render_input(args, tokenizer)
 
-    _logger.debug(f"Generation config: {generation_config}")
+    _logger.debug(f"Generation config: {resolved_generation_config}")
     _logger.debug(f"Input text: {inputs}")
 
     input_tokens = tokenizer.encode(inputs, add_special_tokens=False)
@@ -285,13 +293,15 @@ def run_task(
     if stream_callback is not None:
         # Create a callback-based streamer
         streamer = TokenStreamer(tokenizer, input_tokens, args.model, stream_callback)
-        generation_config["streamer"] = streamer
-        generation_config["pad_token_id"] = tokenizer.eos_token_id
-        generation_config["use_cache"] = True
+        stream_kwargs = {
+            "streamer": streamer,
+            "pad_token_id": tokenizer.eos_token_id,
+            "use_cache": True,
+        }
 
         # Run the pipe function directly - it will call the streamer's put method
         # which will in turn call the stream_callback for each token
-        pipe(inputs, **generation_config)
+        pipe(inputs, generation_config=resolved_generation_config, **stream_kwargs)
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -304,7 +314,7 @@ def run_task(
     output = pipe(
         inputs,
         return_tensors=True,
-        **generation_config,
+        generation_config=resolved_generation_config,
     )
     assert output is not None
     assert isinstance(output, list)

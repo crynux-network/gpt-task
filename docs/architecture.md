@@ -7,6 +7,7 @@ The project targets maximum generality while keeping scope intentionally narrow.
 1. Maximize input-side compatibility across model/tokenizer variations.
 2. Do no output-side processing; return raw decoded text directly (important for result cross-validation in the Crynux Network).
 3. Delegate downstream-specific post-processing (such as tool call parsing) to downstream components.
+4. The system must enforce deterministic execution across heterogeneous multi-GPU environments so outputs remain reproducible and verifiable across nodes.
 
 ## Principles
 

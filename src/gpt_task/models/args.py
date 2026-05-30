@@ -1,8 +1,10 @@
 import base64
 import binascii
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import Field
 from pydantic import field_validator
 from typing_extensions import TypedDict
 
@@ -10,13 +12,17 @@ from .utils import NonEmptyString
 
 
 class TextContentBlock(TypedDict):
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
     type: Literal["text"]
-    text: str
+    text: Annotated[str, Field(min_length=1)]
 
 
 class ImageContentBlock(TypedDict):
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
     type: Literal["image"]
-    base64: str
+    base64: Annotated[str, Field(min_length=1)]
 
 
 MessageContentBlock = Union[TextContentBlock, ImageContentBlock]

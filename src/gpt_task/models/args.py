@@ -14,7 +14,7 @@ class TextContentBlock(TypedDict):
     text: str
 
 
-class ImageContentBlock(TypedDict, total=False):
+class ImageContentBlock(TypedDict):
     type: Literal["image"]
     base64: str
 

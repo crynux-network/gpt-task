@@ -7,18 +7,17 @@ name = "gpt_task"
 authors = [{ name = "lukew", email = "lukew@crynux.ai" }]
 description = "A general framework to define and execute the GPT text generation task."
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 classifiers = ["Programming Language :: Python :: 3"]
 version = "3.1.0"
 dependencies = [
     "numpy",
     "scipy",
-    "torch>=1.4",
-    "transformers>=5.2.0",
+    "torch>=2.12",
+    "transformers>=5.2.0,<6",
     "transformers_stream_generator",
     "sentencepiece",
     "accelerate",
-    "bitsandbytes",
     "tiktoken",
     "einops",
     "pydantic",

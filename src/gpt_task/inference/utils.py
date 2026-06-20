@@ -50,5 +50,9 @@ def use_deterministic_mode():
     torch.use_deterministic_algorithms(True, warn_only=True)
 
     if torch.cuda.is_available():
+        # Use deterministic CUDA backends for reproducible worker results.
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+        torch.backends.fp32_precision = "ieee"
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        torch.backends.cudnn.fp32_precision = "ieee"

@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict, List, Literal, Mapping, Sequence, Union, Callable
 
 import torch
+from accelerate.utils import get_max_memory
 from pydantic import TypeAdapter
 from transformers import AutoProcessor, pipeline, set_seed
 from transformers.generation.streamers import BaseStreamer
@@ -388,23 +389,36 @@ def run_task(
         elif args.quantize_bits == 8:
             from transformers import BitsAndBytesConfig
             model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                load_in_8bit=True,
-                llm_int8_enable_fp32_cpu_offload=True
+                load_in_8bit=True
             )
 
-        pipe = pipeline(
-            task=None,
-            model=args.model,
-            processor=processor,
-            trust_remote_code=True,
-            device_map="auto",
-            dtype=torch_dtype,
-            model_kwargs=dict(
-                offload_folder="offload",
-                offload_state_dict=True,
-                **model_kwargs,
-            ),
-        )
+        # CPU/disk offload is prohibited: CPU kernels differ numerically from
+        # GPU kernels, so offloaded layers would produce divergent results.
+        # With a zero CPU budget the device_map="auto" planner can only place
+        # overflow on disk, and without an offload_folder that load fails --
+        # a model that does not fit the visible GPUs never starts executing.
+        max_memory = get_max_memory()
+        max_memory["cpu"] = 0
+
+        try:
+            pipe = pipeline(
+                task=None,
+                model=args.model,
+                processor=processor,
+                trust_remote_code=True,
+                device_map="auto",
+                dtype=torch_dtype,
+                model_kwargs=dict(
+                    max_memory=max_memory,
+                    **model_kwargs,
+                ),
+            )
+        except ValueError as e:
+            if "offload" in str(e):
+                raise torch.cuda.OutOfMemoryError(
+                    "Model does not fit in the visible GPU memory"
+                ) from e
+            raise
 
         _logger.info("Loading pipeline completes")
         return pipe

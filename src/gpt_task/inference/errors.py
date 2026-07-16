@@ -12,9 +12,11 @@ from typing_extensions import ParamSpec
 
 __all__ = [
     "wrap_error",
+    "error_context",
     "TaskArgsInvalid",
     "ModelInvalid",
     "ModelDownloadError",
+    "ModelNotDownloaded",
     "TaskExecutionError",
 ]
 
@@ -32,6 +34,11 @@ class ModelInvalid(ValueError):
 class ModelDownloadError(ValueError):
     def __str__(self) -> str:
         return "Task model download error"
+
+
+class ModelNotDownloaded(ValueError):
+    def __str__(self) -> str:
+        return "Task model not downloaded"
 
 
 class TaskExecutionError(ValueError):
@@ -62,12 +69,17 @@ def match_exception(e: Exception, targets: Iterable[Type[Exception]]) -> bool:
 
 
 @contextmanager
-def error_context():
+def error_context(local_files_only: bool = False):
     try:
         yield
     except ValidationError as e:
         raise TaskArgsInvalid from e
     except EnvironmentError as e:
+        # In local_files_only mode every model load failure caused by a
+        # missing local cache entry is a not-downloaded model; invalid model
+        # identifiers are indistinguishable from a cache miss offline.
+        if local_files_only:
+            raise ModelNotDownloaded from e
         if match_exception(e, [LocalEntryNotFoundError]):
             raise ModelDownloadError from e
         elif match_exception(

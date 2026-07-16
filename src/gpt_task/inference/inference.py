@@ -11,10 +11,10 @@ from transformers import AutoProcessor, pipeline, set_seed
 from transformers.generation.streamers import BaseStreamer
 
 from gpt_task import models
-from gpt_task.config import Config
+from gpt_task.config import Config, get_config
 from gpt_task.cache import ModelCache
 
-from .errors import wrap_error
+from .errors import error_context
 from .utils import load_model_kwargs, use_deterministic_mode
 from .key import generate_model_key
 from .prompt_adapters import resolve_adapter
@@ -324,8 +324,42 @@ def _resolve_prompt_input_tokens(
     return baseline
 
 
-@wrap_error
 def run_task(
+    args: models.GPTTaskArgs | None = None,
+    *,
+    model: str | None = None,
+    messages: Sequence[models.Message | Mapping[str, Any]] | None = None,
+    tools: Sequence[Dict[str, Any]] | None = None,
+    generation_config: models.GPTGenerationConfig | Mapping[str, Any] | None = None,
+    template_args: Mapping[str, Any] | None = None,
+    stream_callback: Callable[[models.GPTTaskStreamResponse], None] | None = None,
+    seed: int = 0,
+    dtype: Literal["float16", "bfloat16", "float32", "auto"] = "auto",
+    quantize_bits: Literal[4, 8] | None = None,
+    config: Config | None = None,
+    model_cache: ModelCache | None = None,
+) -> Union[models.GPTTaskResponse, models.GPTTaskStreamResponse]:
+    if config is None:
+        config = get_config()
+
+    with error_context(local_files_only=config.local_files_only):
+        return _run_task(
+            args,
+            model=model,
+            messages=messages,
+            tools=tools,
+            generation_config=generation_config,
+            template_args=template_args,
+            stream_callback=stream_callback,
+            seed=seed,
+            dtype=dtype,
+            quantize_bits=quantize_bits,
+            config=config,
+            model_cache=model_cache,
+        )
+
+
+def _run_task(
     args: models.GPTTaskArgs | None = None,
     *,
     model: str | None = None,

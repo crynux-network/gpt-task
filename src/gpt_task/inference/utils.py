@@ -16,6 +16,7 @@ def load_model_kwargs(config: Config | None = None) -> Dict[str, Any]:
     config may contains:
         - cache_dir
         - proxies
+        - local_files_only
     """
     if config is None:
         config = get_config()
@@ -23,6 +24,8 @@ def load_model_kwargs(config: Config | None = None) -> Dict[str, Any]:
     res = {}
     if config.data_dir is not None:
         res["cache_dir"] = config.data_dir.models.huggingface
+    if config.local_files_only:
+        res["local_files_only"] = True
     if config.proxy is not None and config.proxy.host != "":
         if "://" in config.proxy.host:
             scheme, host = config.proxy.host.split("://", 2)

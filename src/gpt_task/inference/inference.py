@@ -374,6 +374,9 @@ def _run_task(
     config: Config | None = None,
     model_cache: ModelCache | None = None,
 ) -> Union[models.GPTTaskResponse, models.GPTTaskStreamResponse]:
+    if config is None:
+        config = get_config()
+
     if args is None:
         args = models.GPTTaskArgs.model_validate(
             {
@@ -409,10 +412,16 @@ def _run_task(
             torch_dtype = torch.bfloat16
 
         model_kwargs = load_model_kwargs(config=config)
-        _logger.debug(f"model kwargs: {model_kwargs}")
+        local_files_only = config.local_files_only
+        _logger.debug(
+            f"model kwargs: {model_kwargs}, local_files_only: {local_files_only}"
+        )
 
         processor = AutoProcessor.from_pretrained(
-            args.model, trust_remote_code=True, **model_kwargs
+            args.model,
+            trust_remote_code=True,
+            local_files_only=local_files_only,
+            **model_kwargs,
         )
 
         if args.quantize_bits == 4:
@@ -435,6 +444,10 @@ def _run_task(
         max_memory["cpu"] = 0
 
         try:
+            # local_files_only must be a top-level argument: transformers 5.x
+            # merges hub kwargs and model_kwargs when loading the config and
+            # weights, so putting it inside model_kwargs raises a duplicate
+            # keyword argument error.
             pipe = pipeline(
                 task=None,
                 model=args.model,
@@ -442,6 +455,7 @@ def _run_task(
                 trust_remote_code=True,
                 device_map="auto",
                 dtype=torch_dtype,
+                local_files_only=local_files_only,
                 model_kwargs=dict(
                     max_memory=max_memory,
                     **model_kwargs,
@@ -453,6 +467,17 @@ def _run_task(
                     "Model does not fit in the visible GPU memory"
                 ) from e
             raise
+
+        # transformers 5.x forwards the top-level local_files_only into the
+        # pipeline constructor, where it ends up in the cached call parameters
+        # and later fails model.generate() as an unknown argument. Drop it
+        # from the cached parameter dicts.
+        for params in (
+            pipe._preprocess_params,
+            pipe._forward_params,
+            pipe._postprocess_params,
+        ):
+            params.pop("local_files_only", None)
 
         _logger.info("Loading pipeline completes")
         return pipe

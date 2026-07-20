@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import copy
 import logging
 from typing import Any, Dict, List, Literal, Mapping, Sequence, Union, Callable
 
 import torch
 from accelerate.utils import get_max_memory
-from pydantic import TypeAdapter
 from transformers import AutoProcessor, pipeline, set_seed
 from transformers.generation.streamers import BaseStreamer
 
@@ -15,7 +13,8 @@ from gpt_task.config import Config, get_config
 from gpt_task.cache import ModelCache
 
 from .errors import error_context
-from .utils import load_model_kwargs, use_deterministic_mode
+from .utils import (load_model_kwargs, resolve_generation_config,
+                    use_deterministic_mode)
 from .key import generate_model_key
 from .prompt_adapters import resolve_adapter
 from .prompt_adapters.utils import contains_image_blocks, content_to_text, to_hf_chat_messages
@@ -492,23 +491,9 @@ def _run_task(
 
     _logger.info("Start text generation")
 
-    generation_kwargs = {"num_return_sequences": 1, "max_new_tokens": 256}
-    if args.generation_config is not None:
-        customer_config = TypeAdapter(models.GPTGenerationConfig).dump_python(
-            args.generation_config,
-            exclude_none=True,
-            exclude_unset=True,
-        )
-        for k, v in customer_config.items():
-            if v is not None:
-                generation_kwargs[k] = v
-
-    resolved_generation_config = copy.deepcopy(pipe.model.generation_config)
-    for k, v in generation_kwargs.items():
-        setattr(resolved_generation_config, k, v)
-    if resolved_generation_config.max_new_tokens is not None:
-        # Avoid transformers warning caused by default max_length=20.
-        resolved_generation_config.max_length = None
+    resolved_generation_config = resolve_generation_config(
+        pipe.model.generation_config, args
+    )
 
     has_image_input = contains_image_blocks(args.messages)
     if has_image_input:

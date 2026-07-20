@@ -22,3 +22,8 @@ class MemoryModelCache(object):
             model = model_loader()
             self._cache[key] = model
             return model
+
+    def clear(self) -> None:
+        self._cache.clear()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()

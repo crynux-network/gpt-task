@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import copy
 import os
 from collections import UserDict
 from typing import Any, Dict
 
 import torch
+from pydantic import TypeAdapter
 from transformers.utils import ModelOutput
 
+from gpt_task import models
 from gpt_task.config import Config, get_config
 
 
@@ -39,6 +42,33 @@ def load_model_kwargs(config: Config | None = None) -> Dict[str, Any]:
         res["proxies"] = {"http": proxy_str, "https": proxy_str}
 
     return res
+
+
+def resolve_generation_config(base_generation_config: Any, args: models.GPTTaskArgs) -> Any:
+    """Resolve the effective GenerationConfig for a task by overlaying the
+    task's generation args on the model's own generation config."""
+    generation_kwargs: Dict[str, Any] = {
+        "num_return_sequences": 1,
+        "max_new_tokens": 256,
+    }
+    if args.generation_config is not None:
+        customer_config = TypeAdapter(models.GPTGenerationConfig).dump_python(
+            args.generation_config,
+            exclude_none=True,
+            exclude_unset=True,
+        )
+        for k, v in customer_config.items():
+            if v is not None:
+                generation_kwargs[k] = v
+
+    resolved_generation_config = copy.deepcopy(base_generation_config)
+    for k, v in generation_kwargs.items():
+        setattr(resolved_generation_config, k, v)
+    # Generation length is controlled exclusively by max_new_tokens, which is
+    # always set; max_length (default 20) would conflict and cause a
+    # transformers warning.
+    resolved_generation_config.max_length = None
+    return resolved_generation_config
 
 
 def use_deterministic_mode():

@@ -16,7 +16,25 @@ from .executor import shutdown_tp_executor, submit_tp_task
 _logger = logging.getLogger(__name__)
 
 
-def _model_supports_tp_plan(args: models.GPTTaskArgs, config: Config) -> bool:
+# Weight dimensions sharded by the transformers tp_plan: q/k/v/o projections
+# are sharded by head counts, dense MLP projections by intermediate_size, and
+# MoE expert projections (including the packed gate_up weight) by the expert
+# and shared expert intermediate sizes. Every dimension present in the model
+# config must be divisible by the rank count, otherwise the checkpoint shards
+# and the allocated parameter shards disagree in shape and the mismatched
+# weights are silently reinitialized.
+_TP_SHARDED_DIM_ATTRS = (
+    "num_attention_heads",
+    "num_key_value_heads",
+    "intermediate_size",
+    "moe_intermediate_size",
+    "shared_expert_intermediate_size",
+)
+
+
+def _model_supports_tp(
+    args: models.GPTTaskArgs, config: Config, world_size: int
+) -> bool:
     from transformers import AutoConfig
 
     model_kwargs = load_model_kwargs(config=config)
@@ -27,22 +45,28 @@ def _model_supports_tp_plan(args: models.GPTTaskArgs, config: Config) -> bool:
         **model_kwargs,
     )
     text_config = model_config.get_text_config()
-    return getattr(text_config, "base_model_tp_plan", None) is not None
+    if getattr(text_config, "base_model_tp_plan", None) is None:
+        return False
+    for attr in _TP_SHARDED_DIM_ATTRS:
+        dim = getattr(text_config, attr, None)
+        if isinstance(dim, int) and dim % world_size != 0:
+            return False
+    return True
 
 
 def _should_fallback_to_classic(
     args: models.GPTTaskArgs, config: Config, world_size: int
 ) -> bool:
-    # The fallback decision depends only on the task args and the model
-    # config, so every node in a TP pool makes the identical choice and
-    # results stay consistent across the pool.
+    # The fallback decision depends only on the task args, the model config
+    # and the visible GPU count, so every node in a TP pool makes the
+    # identical choice and results stay consistent across the pool.
     if world_size < 2:
         return True
     if args.quantize_bits is not None:
         return True
     if contains_image_blocks(args.messages):
         return True
-    if not _model_supports_tp_plan(args, config):
+    if not _model_supports_tp(args, config, world_size):
         return True
     return False
 

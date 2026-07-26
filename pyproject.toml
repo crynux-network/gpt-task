@@ -14,7 +14,7 @@ dependencies = [
     "numpy",
     "scipy",
     "torch>=2.12",
-    "transformers>=5.2.0,<6",
+    "transformers>=5.14.1,<6",
     "transformers_stream_generator",
     "sentencepiece",
     "accelerate",

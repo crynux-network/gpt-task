@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, Literal, Mapping, Sequence, Union
+import os
+from typing import Any, Callable, Dict, Literal, Mapping, Optional, Sequence, Union
 
 from gpt_task import models
 from gpt_task.cache import ModelCache
@@ -14,6 +15,9 @@ from ..utils import load_model_kwargs
 from .executor import shutdown_tp_executor, submit_tp_task
 
 _logger = logging.getLogger(__name__)
+
+TP_FALLBACK_DEVICE_MAP = "device_map"
+TP_FALLBACK_REDUCE_GPUS = "reduce_gpus"
 
 
 # Weight dimensions sharded by the transformers tp_plan: q/k/v/o projections
@@ -32,9 +36,14 @@ _TP_SHARDED_DIM_ATTRS = (
 )
 
 
-def _model_supports_tp(
-    args: models.GPTTaskArgs, config: Config, world_size: int
-) -> bool:
+def _resolve_tp_fallback() -> str:
+    value = os.environ.get("GPT_TP_FALLBACK", TP_FALLBACK_DEVICE_MAP)
+    if value == TP_FALLBACK_REDUCE_GPUS:
+        return TP_FALLBACK_REDUCE_GPUS
+    return TP_FALLBACK_DEVICE_MAP
+
+
+def _load_text_config(args: models.GPTTaskArgs, config: Config):
     from transformers import AutoConfig
 
     model_kwargs = load_model_kwargs(config=config)
@@ -44,9 +53,14 @@ def _model_supports_tp(
         local_files_only=config.local_files_only,
         **model_kwargs,
     )
-    text_config = model_config.get_text_config()
-    if getattr(text_config, "base_model_tp_plan", None) is None:
-        return False
+    return model_config.get_text_config()
+
+
+def _has_tp_plan(text_config) -> bool:
+    return getattr(text_config, "base_model_tp_plan", None) is not None
+
+
+def _dims_divisible_by(text_config, world_size: int) -> bool:
     for attr in _TP_SHARDED_DIM_ATTRS:
         dim = getattr(text_config, attr, None)
         if isinstance(dim, int) and dim % world_size != 0:
@@ -54,21 +68,34 @@ def _model_supports_tp(
     return True
 
 
-def _should_fallback_to_classic(
-    args: models.GPTTaskArgs, config: Config, world_size: int
-) -> bool:
-    # The fallback decision depends only on the task args, the model config
-    # and the visible GPU count, so every node in a TP pool makes the
-    # identical choice and results stay consistent across the pool.
-    if world_size < 2:
-        return True
+def _resolve_tp_world_size(
+    args: models.GPTTaskArgs, config: Config, visible_gpus: int
+) -> Optional[int]:
+    # The fallback decision depends on the task args, the model config, the
+    # visible GPU count, and the node-owned GPT_TP_FALLBACK setting. Nodes in
+    # the same TP pool MUST use the same GPT_TP_FALLBACK value so every node
+    # makes the identical choice and results stay consistent across the pool.
+    if visible_gpus < 2:
+        return None
     if args.quantize_bits is not None:
-        return True
+        return None
     if contains_image_blocks(args.messages):
-        return True
-    if not _model_supports_tp(args, config, world_size):
-        return True
-    return False
+        return None
+
+    text_config = _load_text_config(args, config)
+    if not _has_tp_plan(text_config):
+        return None
+
+    if _dims_divisible_by(text_config, visible_gpus):
+        return visible_gpus
+
+    if _resolve_tp_fallback() != TP_FALLBACK_REDUCE_GPUS:
+        return None
+
+    for k in range(visible_gpus - 1, 1, -1):
+        if _dims_divisible_by(text_config, k):
+            return k
+    return None
 
 
 def run_task_tp(
@@ -89,7 +116,9 @@ def run_task_tp(
     """Run a GPT task on the tensor parallel executor.
 
     Tasks that cannot run under tensor parallelism are delegated to the
-    classic run_task path in-process.
+    classic run_task path in-process. When GPT_TP_FALLBACK=reduce_gpus and
+    the full visible GPU count cannot shard the model, the largest K >= 2
+    that divides all TP-sharded dimensions is used instead.
     """
     if config is None:
         config = get_config()
@@ -111,14 +140,14 @@ def run_task_tp(
 
         import torch
 
-        world_size = torch.cuda.device_count()
-        use_classic = _should_fallback_to_classic(args, config, world_size)
+        visible_gpus = torch.cuda.device_count()
+        world_size = _resolve_tp_world_size(args, config, visible_gpus)
 
     # The two execution paths must never hold models in VRAM at the same
     # time: a classic-fallback task tears down the rank group so its full
     # model load does not compete with the cached shards, and a TP task
     # evicts the worker-level cache before the rank group loads shards.
-    if use_classic:
+    if world_size is None:
         _logger.info(
             "Task is not eligible for tensor parallelism, "
             "falling back to the classic executor"
@@ -129,6 +158,14 @@ def run_task_tp(
             stream_callback=stream_callback,
             config=config,
             model_cache=model_cache,
+        )
+
+    if world_size < visible_gpus:
+        _logger.info(
+            "TP-sharded dimensions are not divisible by %d visible GPUs; "
+            "reducing tensor parallel world size to %d",
+            visible_gpus,
+            world_size,
         )
 
     if model_cache is not None:

@@ -88,6 +88,10 @@ class TPExecutor:
             port,
         )
 
+    @property
+    def world_size(self) -> int:
+        return self._world_size
+
     def all_ranks_alive(self) -> bool:
         return all(p.is_alive() for p in self._processes)
 
@@ -176,11 +180,16 @@ def submit_tp_task(
     stream_callback: Optional[Callable] = None,
 ):
     """Run one task on the lazily-spawned persistent executor, respawning
-    the rank group if it died or was torn down after a previous failure."""
+    the rank group if it died, was torn down after a previous failure, or
+    was created for a different world_size (reduce_gpus may pick a different
+    K per model)."""
     global _executor
 
     with _executor_lock:
-        if _executor is not None and not _executor.all_ranks_alive():
+        if _executor is not None and (
+            not _executor.all_ranks_alive()
+            or _executor.world_size != world_size
+        ):
             _executor.shutdown()
             _executor = None
         if _executor is None:

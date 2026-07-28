@@ -8,7 +8,39 @@ from typing import Any, Dict, List, Tuple
 from gpt_task import models
 from gpt_task.config import Config
 
+from .model_family import TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT
+
 _logger = logging.getLogger(__name__)
+
+
+def _prepare_task_inputs(
+    model_family: str,
+    processor: Any,
+    tokenizer: Any,
+    args: models.GPTTaskArgs,
+    device: Any,
+):
+    from ..inference import prepare_vlm_inputs
+    from ..prompt_adapters import resolve_adapter
+    from ..prompt_adapters.utils import contains_image_blocks
+
+    if (
+        model_family == TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT
+        and contains_image_blocks(args.messages)
+    ):
+        return prepare_vlm_inputs(processor, args.messages, device)
+
+    adapter = resolve_adapter(args.model, tokenizer)
+    input_text = adapter.render_input(args, tokenizer)
+    encoded = tokenizer(
+        input_text,
+        return_tensors="pt",
+        add_special_tokens=False,
+    )
+    return {
+        key: value.to(device)
+        for key, value in encoded.items()
+    }
 
 
 def rank_worker_main(
@@ -49,18 +81,25 @@ def rank_worker_main(
     )
 
     # One cached model per rank process; replaced when the model key changes.
-    model_cache: Dict[str, Tuple[Any, Any]] = {}
+    model_cache: Dict[str, Tuple[Any, Any, Any]] = {}
 
     try:
         while True:
             msg = task_queue.get()
             if msg[0] == "stop":
                 break
-            _, seq, args, config, stream = msg
+            _, seq, model_family, args, config, stream = msg
             try:
                 with error_context(local_files_only=config.local_files_only):
                     resp = _execute_task(
-                        rank, seq, args, config, stream, result_queue, model_cache
+                        rank,
+                        seq,
+                        model_family,
+                        args,
+                        config,
+                        stream,
+                        result_queue,
+                        model_cache,
                     )
                 if rank == 0:
                     result_queue.put(("result", seq, resp))
@@ -75,18 +114,24 @@ def rank_worker_main(
 def _execute_task(
     rank: int,
     seq: int,
+    model_family: str,
     args: models.GPTTaskArgs,
     config: Config,
     stream: bool,
     result_queue: Any,
-    model_cache: Dict[str, Tuple[Any, Any]],
+    model_cache: Dict[str, Tuple[Any, Any, Any]],
 ):
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoModelForImageTextToText,
+        AutoProcessor,
+        AutoTokenizer,
+        set_seed,
+    )
 
     from ..inference import TokenStreamer
     from ..key import generate_model_key
-    from ..prompt_adapters import resolve_adapter
     from ..utils import (load_model_kwargs, resolve_generation_config,
                          use_deterministic_mode)
 
@@ -97,7 +142,7 @@ def _execute_task(
     use_deterministic_mode()
     set_seed(args.seed)
 
-    model_key = generate_model_key(args)
+    model_key = f"{model_family}:{generate_model_key(args)}"
     if model_key not in model_cache:
         model_cache.clear()
         torch.cuda.empty_cache()
@@ -113,24 +158,44 @@ def _execute_task(
         model_kwargs = load_model_kwargs(config=config)
         local_files_only = config.local_files_only
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.model,
-            trust_remote_code=True,
-            local_files_only=local_files_only,
-            **model_kwargs,
-        )
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model,
-            tp_plan="auto",
-            dtype=torch_dtype,
-            trust_remote_code=True,
-            local_files_only=local_files_only,
-            **model_kwargs,
-        )
+        processor = None
+        if model_family == TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT:
+            processor = AutoProcessor.from_pretrained(
+                args.model,
+                trust_remote_code=True,
+                local_files_only=local_files_only,
+                **model_kwargs,
+            )
+            tokenizer = processor.tokenizer
+            model = AutoModelForImageTextToText.from_pretrained(
+                args.model,
+                tp_plan="auto",
+                dtype=torch_dtype,
+                trust_remote_code=True,
+                local_files_only=local_files_only,
+                **model_kwargs,
+            )
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(
+                args.model,
+                trust_remote_code=True,
+                local_files_only=local_files_only,
+                **model_kwargs,
+            )
+            model = AutoModelForCausalLM.from_pretrained(
+                args.model,
+                tp_plan="auto",
+                dtype=torch_dtype,
+                trust_remote_code=True,
+                local_files_only=local_files_only,
+                **model_kwargs,
+            )
         model.eval()
-        model_cache[model_key] = (model, tokenizer)
+        if rank == 0:
+            _logger.info("Effective TP plan: %s", getattr(model, "tp_plan", None))
+        model_cache[model_key] = (model, tokenizer, processor)
 
-    model, tokenizer = model_cache[model_key]
+    model, tokenizer, processor = model_cache[model_key]
 
     resolved_generation_config = resolve_generation_config(
         model.generation_config, args
@@ -140,10 +205,13 @@ def _execute_task(
     if stream:
         resolved_generation_config.use_cache = True
 
-    adapter = resolve_adapter(args.model, tokenizer)
-    input_text = adapter.render_input(args, tokenizer)
-    encoded = tokenizer(input_text, return_tensors="pt", add_special_tokens=False)
-    encoded = {k: v.to(model.device) for k, v in encoded.items()}
+    encoded = _prepare_task_inputs(
+        model_family,
+        processor,
+        tokenizer,
+        args,
+        torch.device(f"cuda:{rank}"),
+    )
     input_tokens: List[int] = encoded["input_ids"][0].tolist()
 
     streamer = None

@@ -47,12 +47,16 @@ The project targets maximum generality while keeping scope intentionally narrow.
 
 3. Generation and streaming runtime
    - Executes model inference, streaming callbacks, finish reasons, and usage accounting.
-   - Uses one model-capability-driven flow: `AutoProcessor.from_pretrained(...)` + `pipeline(task=None, ...)`.
+   - The classic executor uses the model-capability-driven `AutoProcessor.from_pretrained(...)` + `pipeline(task=None, ...)` flow.
+   - The tensor-parallel executor uses persistent ranks and selects `AutoModelForCausalLM` or `AutoModelForImageTextToText` from the complete config mapping.
    - Related docs:
      - `docs/streaming_design.md`
      - `docs/model_cache.md`
+     - `docs/tensor_parallel.md`
    - File:
      - `src/gpt_task/inference/inference.py`
+     - `src/gpt_task/inference/tp/api.py`
+     - `src/gpt_task/inference/tp/rank_worker.py`
 
 4. Output boundary
    - Assembles plain-text assistant messages only.
@@ -64,8 +68,8 @@ The project targets maximum generality while keeping scope intentionally narrow.
 ## Implementation Path
 
 1. `run_task()` validates/binds input into `GPTTaskArgs`.
-2. Prompt-rendering layer resolves either prompt text (LLM path) or HF chat blocks (VLM path).
-3. Runtime executes generation with a single auto-dispatch pipeline (streaming or non-streaming).
+2. Prompt-rendering layer resolves either prompt text or HF multimodal chat blocks.
+3. Runtime executes generation through the classic auto-dispatch pipeline or eligible tensor-parallel ranks.
 4. Response assembly returns raw decoded text in assistant content.
 
 ## File Navigation Map
@@ -81,6 +85,7 @@ The project targets maximum generality while keeping scope intentionally narrow.
 - Prompt compatibility spec: `docs/prompt_format_compatibility.md`
 - Streaming runtime spec: `docs/streaming_design.md`
 - Model cache spec: `docs/model_cache.md`
+- Tensor-parallel runtime spec: `docs/tensor_parallel.md`
 
 ## Scope Boundary
 

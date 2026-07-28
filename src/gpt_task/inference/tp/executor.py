@@ -113,6 +113,7 @@ class TPExecutor:
 
     def submit(
         self,
+        model_family: str,
         args: models.GPTTaskArgs,
         config: Config,
         stream_callback: Optional[Callable] = None,
@@ -123,7 +124,14 @@ class TPExecutor:
         self._seq += 1
         seq = self._seq
 
-        payload = ("task", seq, args, config, stream_callback is not None)
+        payload = (
+            "task",
+            seq,
+            model_family,
+            args,
+            config,
+            stream_callback is not None,
+        )
         for q in self._task_queues:
             q.put(payload)
 
@@ -175,6 +183,7 @@ def shutdown_tp_executor() -> None:
 
 def submit_tp_task(
     world_size: int,
+    model_family: str,
     args: models.GPTTaskArgs,
     config: Config,
     stream_callback: Optional[Callable] = None,
@@ -197,7 +206,7 @@ def submit_tp_task(
         executor = _executor
 
     try:
-        return executor.submit(args, config, stream_callback)
+        return executor.submit(model_family, args, config, stream_callback)
     except Exception as e:
         if type(e).__name__ not in _PRE_EXECUTION_ERROR_TYPES:
             with _executor_lock:

@@ -175,6 +175,24 @@ def _resolve_pipeline_tokenizer(pipe: Any) -> Any:
     raise RuntimeError("Failed to resolve tokenizer from pipeline.")
 
 
+def prepare_vlm_inputs(
+    processor: Any,
+    messages: Sequence[models.Message],
+    device: Any,
+) -> Dict[str, Any]:
+    inputs = processor.apply_chat_template(
+        to_hf_chat_messages(list(messages)),
+        add_generation_prompt=True,
+        tokenize=True,
+        return_dict=True,
+        return_tensors="pt",
+    )
+    return {
+        key: value.to(device) if torch.is_tensor(value) else value
+        for key, value in inputs.items()
+    }
+
+
 def _build_prompt_token_baseline(
     tokenizer: Any,
     inputs: Union[str, List[Dict[str, Any]]],
@@ -497,27 +515,53 @@ def _run_task(
 
     has_image_input = contains_image_blocks(args.messages)
     if has_image_input:
-        inputs: Union[str, List[Dict[str, Any]]] = to_hf_chat_messages(args.messages)
+        processor = getattr(pipe, "processor", None)
+        if processor is None:
+            raise RuntimeError("Image-text-to-text pipeline has no processor.")
+        encoded_vlm = prepare_vlm_inputs(
+            processor,
+            args.messages,
+            pipe.model.device,
+        )
+        input_tokens = _to_token_id_list(encoded_vlm.get("input_ids"))
+        if input_tokens is None:
+            raise RuntimeError("VLM processor did not produce input_ids.")
+        inputs: Union[str, List[Dict[str, Any]]] = to_hf_chat_messages(
+            args.messages
+        )
     else:
         adapter = resolve_adapter(args.model, tokenizer)
         inputs = adapter.render_input(args, tokenizer)
+        encoded_vlm = None
+        input_tokens = _resolve_prompt_input_tokens(
+            pipe,
+            tokenizer,
+            inputs,
+            args.messages,
+        )
 
     _logger.debug(f"Generation config: {resolved_generation_config}")
     _logger.debug(f"Input text: {inputs}")
-
-    input_tokens = _resolve_prompt_input_tokens(pipe, tokenizer, inputs, args.messages)
 
     if stream_callback is not None:
         streamer = TokenStreamer(tokenizer, input_tokens, args.model, stream_callback)
         resolved_generation_config.pad_token_id = tokenizer.eos_token_id
         resolved_generation_config.use_cache = True
 
-        _invoke_pipeline(
-            pipe,
-            inputs,
-            resolved_generation_config,
-            streamer=streamer,
-        )
+        if encoded_vlm is not None:
+            with torch.no_grad():
+                pipe.model.generate(
+                    **encoded_vlm,
+                    generation_config=resolved_generation_config,
+                    streamer=streamer,
+                )
+        else:
+            _invoke_pipeline(
+                pipe,
+                inputs,
+                resolved_generation_config,
+                streamer=streamer,
+            )
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -527,28 +571,43 @@ def _run_task(
         # Return None since we're using callbacks instead of returning a generator
         return None
 
-    output = _invoke_pipeline(
-        pipe,
-        inputs,
-        resolved_generation_config,
-        return_tensors=True,
-    )
-    assert output is not None
-    assert isinstance(output, list)
-
-    _logger.debug(f"Raw output: {output}")
-
     generations: List[Dict[str, Any]] = []
-    for single in output:
-        assert isinstance(single, dict)
-        token_ids = _to_token_id_list(single.get("generated_token_ids"))
-        generated_text = _extract_generated_text(single.get("generated_text"))
-        generations.append(
-            {
-                "token_ids": token_ids,
-                "generated_text": generated_text,
-            }
+    if encoded_vlm is not None:
+        if resolved_generation_config.pad_token_id is None:
+            resolved_generation_config.pad_token_id = tokenizer.eos_token_id
+        with torch.no_grad():
+            output = pipe.model.generate(
+                **encoded_vlm,
+                generation_config=resolved_generation_config,
+            )
+        _logger.debug(f"Raw output: {output}")
+        for sequence in output.tolist():
+            generations.append(
+                {
+                    "token_ids": [int(token) for token in sequence],
+                    "generated_text": "",
+                }
+            )
+    else:
+        output = _invoke_pipeline(
+            pipe,
+            inputs,
+            resolved_generation_config,
+            return_tensors=True,
         )
+        assert output is not None
+        assert isinstance(output, list)
+        _logger.debug(f"Raw output: {output}")
+        for single in output:
+            assert isinstance(single, dict)
+            token_ids = _to_token_id_list(single.get("generated_token_ids"))
+            generated_text = _extract_generated_text(single.get("generated_text"))
+            generations.append(
+                {
+                    "token_ids": token_ids,
+                    "generated_text": generated_text,
+                }
+            )
 
     assert len(generations) > 0
 

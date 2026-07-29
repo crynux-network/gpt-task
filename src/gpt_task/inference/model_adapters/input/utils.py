@@ -30,8 +30,7 @@ def apply_chat_template(
 ) -> str:
     merged_args = dict(template_args)
     if optional_args:
-        for key, value in optional_args.items():
-            merged_args[key] = value
+        merged_args.update(optional_args)
 
     try:
         return tokenizer.apply_chat_template(chats, **merged_args)
@@ -46,7 +45,6 @@ def apply_chat_template(
             return tokenizer.apply_chat_template(chats, **retry_args)
         except TypeError:
             retry_args.pop(key, None)
-            continue
 
     return tokenizer.apply_chat_template(chats, **template_args)
 
@@ -67,14 +65,15 @@ def content_to_text(content: models.MessageContent | None) -> str:
 
 
 def contains_image_blocks(messages: List[models.Message]) -> bool:
-    for message in messages:
-        content = message.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if block.get("type") == "image":
-                return True
-    return False
+    return any(
+        block.get("type") == "image"
+        for message in messages
+        for block in (
+            message.get("content")
+            if isinstance(message.get("content"), list)
+            else []
+        )
+    )
 
 
 def to_hf_chat_messages(messages: List[models.Message]) -> List[Dict[str, Any]]:
@@ -96,13 +95,8 @@ def _to_hf_content_blocks(
         block_type = block.get("type")
         if block_type == "text":
             hf_blocks.append({"type": "text", "text": block.get("text", "")})
-            continue
-        if block_type == "image":
-            hf_blocks.append(_normalize_hf_image_block(block))
-            continue
-        raise RuntimeError(f"Unsupported content block type: {block_type}")
+        elif block_type == "image":
+            hf_blocks.append({"type": "image", "base64": block["base64"]})
+        else:
+            raise RuntimeError(f"Unsupported content block type: {block_type}")
     return hf_blocks
-
-
-def _normalize_hf_image_block(block: models.ImageContentBlock) -> Dict[str, Any]:
-    return {"type": "image", "base64": block["base64"]}

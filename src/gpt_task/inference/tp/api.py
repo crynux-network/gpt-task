@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Literal, Mapping, Optional, Union
 
 from gpt_task import models
 from gpt_task.cache import ModelCache
@@ -11,11 +11,14 @@ from gpt_task.config import Config, get_config
 
 from ..errors import error_context
 from ..inference import run_task
+from ..model_adapters.input import contains_image_blocks
+from ..model_adapters.tp_plan import validate_effective_tp_plan
 from ..utils import load_model_kwargs
 from .executor import shutdown_tp_executor, submit_tp_task
-from .model_family import (
-    TP_MODEL_FAMILY_CAUSAL_LM,
-    TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT,
+from .runtime_strategy import (
+    TP_MODEL_LOADER_CAUSAL_LM,
+    TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT,
+    TPRuntimeStrategy,
 )
 
 _logger = logging.getLogger(__name__)
@@ -23,48 +26,10 @@ _logger = logging.getLogger(__name__)
 TP_FALLBACK_DEVICE_MAP = "device_map"
 TP_FALLBACK_REDUCE_GPUS = "reduce_gpus"
 
-_TEXT_TP_SHARDED_DIM_ATTRS = (
-    "hidden_size",
-    "num_attention_heads",
-    "num_key_value_heads",
-    "intermediate_size",
-    "moe_intermediate_size",
-    "shared_expert_intermediate_size",
-)
-_VISION_TP_SHARDED_DIM_ATTRS = (
-    "hidden_size",
-    "num_heads",
-    "num_attention_heads",
-    "intermediate_size",
-)
-_STANDARD_VISION_PLAN_PARTS = (
-    ".self_attn.q_proj",
-    ".self_attn.k_proj",
-    ".self_attn.v_proj",
-    ".self_attn.o_proj",
-    ".attn.qkv",
-    ".attn.proj",
-    ".mlp.fc1",
-    ".mlp.fc2",
-)
-_VISION_PLAN_VALIDATORS = {
-    "ernie4_5_vl_moe": (
-        "hidden_size",
-        "num_heads",
-        "intermediate_size",
-    ),
-    "llama4": (
-        "hidden_size",
-        "num_attention_heads",
-        "intermediate_size",
-    ),
-}
-
-
 @dataclass(frozen=True)
 class _TPTaskResolution:
     world_size: int
-    model_family: str
+    strategy: TPRuntimeStrategy
 
 
 def _resolve_tp_fallback() -> str:
@@ -86,11 +51,11 @@ def _load_model_config(args: models.GPTTaskArgs, config: Config):
     )
 
 
-def _mapped_model_class(model_config, model_family: str):
+def _mapped_model_class(model_config, model_loader: str):
     from transformers import AutoModelForCausalLM, AutoModelForImageTextToText
     from transformers.models.auto.auto_factory import _get_model_class
 
-    if model_family == TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT:
+    if model_loader == TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT:
         mapping = AutoModelForImageTextToText._model_mapping
     else:
         mapping = AutoModelForCausalLM._model_mapping
@@ -98,17 +63,47 @@ def _mapped_model_class(model_config, model_family: str):
     config_type = type(model_config)
     if config_type not in mapping:
         return None
-    return _get_model_class(model_config, mapping)
+    try:
+        return _get_model_class(model_config, mapping)
+    except (ImportError, RuntimeError):
+        return None
 
 
-def _resolve_model_family(model_config) -> Optional[str]:
-    if _mapped_model_class(
-        model_config, TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT
-    ) is not None:
-        return TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT
-    if _mapped_model_class(model_config, TP_MODEL_FAMILY_CAUSAL_LM) is not None:
-        return TP_MODEL_FAMILY_CAUSAL_LM
-    return None
+def _is_builtin_mapped(model_config, model_loader: str) -> bool:
+    from transformers import AutoModelForCausalLM, AutoModelForImageTextToText
+
+    mapping = (
+        AutoModelForImageTextToText._model_mapping
+        if model_loader == TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT
+        else AutoModelForCausalLM._model_mapping
+    )
+    return type(model_config) in mapping
+
+
+def _has_remote_auto_map(model_config, loader: str) -> bool:
+    auto_map = getattr(model_config, "auto_map", None) or {}
+    return isinstance(auto_map, Mapping) and loader in auto_map
+
+
+def _resolve_runtime_strategy(
+    model_config,
+    *,
+    has_image_input: bool = False,
+) -> TPRuntimeStrategy:
+    if _is_builtin_mapped(
+        model_config, TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT
+    ) or _has_remote_auto_map(
+        model_config, TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT
+    ):
+        return TPRuntimeStrategy(TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT, True)
+
+    remote_causal_lm = _has_remote_auto_map(
+        model_config, TP_MODEL_LOADER_CAUSAL_LM
+    )
+    return TPRuntimeStrategy(
+        TP_MODEL_LOADER_CAUSAL_LM,
+        has_image_input and remote_causal_lm,
+    )
 
 
 def _has_tp_plan(model_config) -> bool:
@@ -133,9 +128,11 @@ def _iter_config_tp_plans(model_config):
             pending.append((f"{prefix}.{name}", getattr(current, name, None)))
 
 
-def _effective_tp_plan(model_config, model_family: str) -> Dict[str, str]:
+def _effective_tp_plan(
+    model_config, strategy: TPRuntimeStrategy
+) -> Dict[str, str]:
     plan: Dict[str, str] = {}
-    model_class = _mapped_model_class(model_config, model_family)
+    model_class = _mapped_model_class(model_config, strategy.model_loader)
     if model_class is not None:
         for name, style in (getattr(model_class, "_tp_plan", None) or {}).items():
             plan[f"model.{name}"] = style
@@ -156,71 +153,15 @@ def _effective_tp_plan(model_config, model_family: str) -> Dict[str, str]:
     return plan
 
 
-def _plan_shards_vocabulary(plan: Mapping[str, str]) -> bool:
-    for name, style in plan.items():
-        if "embed_tokens" in name and style == "embedding_rowwise":
-            return True
-        if "lm_head" in name and style.startswith("colwise"):
-            return True
-    return False
-
-
-def _dims_are_divisible(config, attrs: Sequence[str], world_size: int) -> bool:
-    for attr in attrs:
-        dim = getattr(config, attr, None)
-        if isinstance(dim, int) and dim % world_size != 0:
-            return False
-        if isinstance(dim, (list, tuple)) and any(
-            isinstance(value, int) and value % world_size != 0
-            for value in dim
-        ):
-            return False
-    return True
-
-
-def _vision_plan_dims(model_config) -> Optional[Sequence[str]]:
-    vision_config = getattr(model_config, "vision_config", None)
-    vision_plan = getattr(vision_config, "base_model_tp_plan", None) or {}
-    if not vision_plan:
-        return ()
-
-    model_type = getattr(model_config, "model_type", "")
-    validator_dims = _VISION_PLAN_VALIDATORS.get(model_type)
-    if validator_dims is not None:
-        return validator_dims
-
-    if all(
-        any(name.endswith(part) for part in _STANDARD_VISION_PLAN_PARTS)
-        for name in vision_plan
-    ):
-        return _VISION_TP_SHARDED_DIM_ATTRS
-    return None
-
-
 def _dims_divisible_by(
-    model_config, model_family: str, world_size: int
+    model_config, strategy: TPRuntimeStrategy, world_size: int
 ) -> bool:
-    text_config = model_config.get_text_config()
-    if not _dims_are_divisible(
-        text_config, _TEXT_TP_SHARDED_DIM_ATTRS, world_size
-    ):
-        return False
-
-    effective_plan = _effective_tp_plan(model_config, model_family)
-    if _plan_shards_vocabulary(effective_plan) and not _dims_are_divisible(
-        text_config, ("vocab_size",), world_size
-    ):
-        return False
-
-    vision_dims = _vision_plan_dims(model_config)
-    if vision_dims is None:
-        return False
-    vision_config = getattr(model_config, "vision_config", None)
-    if vision_dims and not _dims_are_divisible(
-        vision_config, vision_dims, world_size
-    ):
-        return False
-    return True
+    effective_plan = _effective_tp_plan(model_config, strategy)
+    return validate_effective_tp_plan(
+        model_config,
+        effective_plan,
+        world_size,
+    )
 
 
 def _resolve_tp_task(
@@ -236,19 +177,22 @@ def _resolve_tp_task(
         return None
 
     model_config = _load_model_config(args, config)
-    model_family = _resolve_model_family(model_config)
-    if model_family is None or not _has_tp_plan(model_config):
+    if not _has_tp_plan(model_config):
         return None
+    strategy = _resolve_runtime_strategy(
+        model_config,
+        has_image_input=contains_image_blocks(args.messages),
+    )
 
-    if _dims_divisible_by(model_config, model_family, visible_gpus):
-        return _TPTaskResolution(visible_gpus, model_family)
+    if _dims_divisible_by(model_config, strategy, visible_gpus):
+        return _TPTaskResolution(visible_gpus, strategy)
 
     if _resolve_tp_fallback() != TP_FALLBACK_REDUCE_GPUS:
         return None
 
     for k in range(visible_gpus - 1, 1, -1):
-        if _dims_divisible_by(model_config, model_family, k):
-            return _TPTaskResolution(k, model_family)
+        if _dims_divisible_by(model_config, strategy, k):
+            return _TPTaskResolution(k, strategy)
     return None
 
 
@@ -335,7 +279,7 @@ def run_task_tp(
 
     return submit_tp_task(
         world_size,
-        resolution.model_family,
+        resolution.strategy,
         args,
         config,
         stream_callback,

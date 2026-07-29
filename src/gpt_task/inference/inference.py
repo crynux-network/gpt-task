@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Literal, Mapping, Sequence, Union, Callable
 
 import torch
 from accelerate.utils import get_max_memory
-from transformers import AutoProcessor, pipeline, set_seed
 from transformers.generation.streamers import BaseStreamer
 
 from gpt_task import models
@@ -13,11 +12,15 @@ from gpt_task.config import Config, get_config
 from gpt_task.cache import ModelCache
 
 from .errors import error_context
+from .input_rendering import render_task_input
 from .utils import (load_model_kwargs, resolve_generation_config,
                     use_deterministic_mode)
 from .key import generate_model_key
-from .prompt_adapters import resolve_adapter
-from .prompt_adapters.utils import contains_image_blocks, content_to_text, to_hf_chat_messages
+from .model_adapters import ModelAdapterContext
+from .model_adapters.artifacts import configure_artifacts
+from .model_adapters.input import (
+    content_to_text,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -177,20 +180,19 @@ def _resolve_pipeline_tokenizer(pipe: Any) -> Any:
 
 def prepare_vlm_inputs(
     processor: Any,
-    messages: Sequence[models.Message],
+    args: models.GPTTaskArgs,
     device: Any,
+    model_config: Any = None,
 ) -> Dict[str, Any]:
-    inputs = processor.apply_chat_template(
-        to_hf_chat_messages(list(messages)),
-        add_generation_prompt=True,
-        tokenize=True,
-        return_dict=True,
-        return_tensors="pt",
+    context = ModelAdapterContext(
+        config=model_config,
+        processor=processor,
+        tokenizer=getattr(processor, "tokenizer", None),
     )
-    return {
-        key: value.to(device) if torch.is_tensor(value) else value
-        for key, value in inputs.items()
-    }
+    rendered = render_task_input(context, args, device)
+    if rendered.encoded is None:
+        raise RuntimeError("Vision input adapter did not produce encoded inputs.")
+    return rendered.encoded
 
 
 def _build_prompt_token_baseline(
@@ -391,6 +393,8 @@ def _run_task(
     config: Config | None = None,
     model_cache: ModelCache | None = None,
 ) -> Union[models.GPTTaskResponse, models.GPTTaskStreamResponse]:
+    from transformers import set_seed
+
     if config is None:
         config = get_config()
 
@@ -418,6 +422,8 @@ def _run_task(
     model_key = generate_model_key(args)
 
     def model_loader():
+        from transformers import AutoProcessor, pipeline
+
         _logger.info("Start loading pipeline")
 
         torch_dtype = None
@@ -496,6 +502,14 @@ def _run_task(
         ):
             params.pop("local_files_only", None)
 
+        configure_artifacts(
+            ModelAdapterContext(
+                config=pipe.model.config,
+                model=pipe.model,
+                processor=getattr(pipe, "processor", None),
+                tokenizer=_resolve_pipeline_tokenizer(pipe),
+            )
+        )
         _logger.info("Loading pipeline completes")
         return pipe
 
@@ -513,26 +527,24 @@ def _run_task(
         pipe.model.generation_config, args
     )
 
-    has_image_input = contains_image_blocks(args.messages)
-    if has_image_input:
-        processor = getattr(pipe, "processor", None)
-        if processor is None:
-            raise RuntimeError("Image-text-to-text pipeline has no processor.")
-        encoded_vlm = prepare_vlm_inputs(
-            processor,
-            args.messages,
-            pipe.model.device,
-        )
+    adapter_context = ModelAdapterContext(
+        config=pipe.model.config,
+        model=pipe.model,
+        processor=getattr(pipe, "processor", None),
+        tokenizer=tokenizer,
+    )
+    rendered_input = render_task_input(
+        adapter_context,
+        args,
+        pipe.model.device,
+    )
+    inputs = rendered_input.generation_input
+    encoded_vlm = rendered_input.encoded
+    if encoded_vlm is not None:
         input_tokens = _to_token_id_list(encoded_vlm.get("input_ids"))
         if input_tokens is None:
             raise RuntimeError("VLM processor did not produce input_ids.")
-        inputs: Union[str, List[Dict[str, Any]]] = to_hf_chat_messages(
-            args.messages
-        )
     else:
-        adapter = resolve_adapter(args.model, tokenizer)
-        inputs = adapter.render_input(args, tokenizer)
-        encoded_vlm = None
         input_tokens = _resolve_prompt_input_tokens(
             pipe,
             tokenizer,

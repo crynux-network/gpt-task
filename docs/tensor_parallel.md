@@ -1,55 +1,108 @@
 # Tensor Parallel Inference
 
+## Authority and Scope
+
+This document defines the tensor-parallel backend contract subordinate to the immutable six-stage execution and adapter contracts in [`model-compatibility/architecture.md`](model-compatibility/architecture.md). Model compatibility evidence MUST come from [`model-compatibility/`](model-compatibility/AGENTS.md). Model pages are verified samples and MUST NOT become runtime model-ID allowlists.
+
+Runtime selection MUST depend on loaded configuration, AutoClass resolution, effective plans, visible GPUs, quantization, and dimension validation.
+
+## Config and AutoClass Resolution
+
+`run_task_tp` MUST load the complete model config exactly once while resolving a task. Installed Transformers mappings and trusted repository `auto_map` entries MUST both participate in AutoClass resolution.
+
+A static config mapping MUST use its mapped class. When a config type is absent from a static mapping, a repository `auto_map` entry MUST be resolved through the requested AutoClass with `trust_remote_code=True`. The runtime MUST NOT hardcode remote class names.
+
+`AutoModelForImageTextToText` MUST take precedence when a static mapping or remote `auto_map` entry exists. Otherwise TP MUST select `AutoModelForCausalLM`. A trusted remote causal mapping combined with image input MUST also require `AutoProcessor`; text-only input MUST use `AutoTokenizer`. `vision_config` alone MUST NOT select a model loader.
+
+Remote AutoClass resolution does not prove TP compatibility. The resolved class and loaded config MUST satisfy the same plan and dimension requirements as installed classes.
+
 ## Eligibility and Fallback
 
-`run_task_tp` MUST load the complete model config exactly once while resolving eligibility. A config mapped by `AutoModelForImageTextToText` MUST use the VLM TP path. Otherwise, a config mapped by `AutoModelForCausalLM` MUST use the causal-LM TP path. A config with neither mapping MUST use classic `run_task`; the presence of `vision_config` alone MUST NOT determine the model family.
+TP requires:
 
-The text config returned by `get_text_config()` MUST declare a non-empty `base_model_tp_plan`. Tensor parallel execution also requires at least two visible GPUs and `quantize_bits=None`. Image content does not change these eligibility rules.
+1. At least two visible GPUs.
+2. `quantize_bits=None`.
+3. A selected generation AutoClass strategy.
+4. A text config with a non-empty `base_model_tp_plan`.
+5. A complete effective TP plan that passes all applicable validators for the candidate world size.
+
+Image content MUST NOT by itself force classic execution.
 
 `GPT_TP_FALLBACK` has two behaviors:
 
-- `device_map` MUST immediately use classic `run_task`, which loads through `device_map="auto"`, when the full visible GPU count is incompatible.
-- `reduce_gpus` MUST test smaller world sizes in descending order and select the largest compatible K where K is at least 2. It MUST use classic `run_task` when no compatible K exists.
+- `device_map` MUST use classic `run_task` with `device_map="auto"` when the full visible GPU count is incompatible.
+- `reduce_gpus` MUST test smaller world sizes in descending order, select the largest compatible size of at least two, and use classic execution when none is compatible.
 
 Every value other than `reduce_gpus`, including `classic`, MUST use `device_map` behavior. A TP model load MUST pass `tp_plan="auto"` and MUST NOT pass `device_map="auto"`.
 
-## Effective TP Plan Validation
+Before classic fallback starts, the TP rank group MUST shut down. Before TP starts, the worker-level classic cache MUST clear. Classic and TP model copies MUST NOT occupy GPU memory simultaneously.
 
-The effective plan MUST include the mapped model class `_tp_plan`, the text config `base_model_tp_plan`, and the vision config `base_model_tp_plan`. Every candidate world size MUST divide each present text dimension:
+## Effective TP Plan
 
-- `hidden_size`
-- `num_attention_heads`
-- `num_key_value_heads`
-- `intermediate_size`
-- `moe_intermediate_size`
-- `shared_expert_intermediate_size`
+The effective plan MUST include:
 
-`vocab_size` MUST also be divisible when an effective-plan entry shards an embedding or `lm_head` on the vocabulary dimension.
+- the resolved model class `_tp_plan`;
+- the text config `base_model_tp_plan`;
+- every applicable nested sub-config `base_model_tp_plan`, including vision plans.
 
-An empty vision plan means the complete vision tower is replicated on every rank, and vision dimensions MUST NOT affect world-size selection. A non-empty vision plan MUST validate vision `hidden_size`, `num_heads` or `num_attention_heads`, and `intermediate_size`. Nonstandard vision patch-embedding and adapter entries MUST have a complete model-type-specific validator; an unknown nonstandard plan MUST use classic execution.
+The validator MUST infer required dimensions from non-replicated effective-plan entries. Recognized attention, linear-attention, MLP, expert, embedding, and output-head entries MUST map to their corresponding dimensions. Every inferred dimension MUST divide the candidate world size:
 
-`ernie4_5_vl_moe` is the verified sharded-vision reference. Its validator covers `hidden_size`, `num_heads`, and `intermediate_size` for the plan entries that shard attention qkv/proj and MLP fc1/fc2. Llama 4 additionally validates its patch-embedding and vision-adapter plan through its model-specific validation boundary.
+- `hidden_size`;
+- `num_attention_heads`;
+- `num_key_value_heads`;
+- `intermediate_size`;
+- `moe_intermediate_size`;
+- `shared_expert_intermediate_size`.
 
-## Rank Model and Input Handling
+Each integer in a list-valued inferred dimension MUST divide the candidate world size. `vocab_size` MUST divide the candidate when the effective plan shards an embedding or `lm_head`. A dimension that is present in config but not sharded by the effective plan MUST NOT reject a candidate.
 
-The causal-LM rank path MUST load `AutoTokenizer` and `AutoModelForCausalLM`. The VLM rank path MUST load `AutoProcessor` and `AutoModelForImageTextToText`. Both model classes MUST load with `tp_plan="auto"`, and rank 0 MUST log the resulting `model.tp_plan`.
+An unknown non-replicated text-plan entry MUST use classic execution. A `replicated` entry and `moe_tp_experts` MUST NOT add a divisibility constraint.
 
-Image requests MUST use the shared `prepare_vlm_inputs` helper. The helper MUST:
+An empty vision plan means the complete vision tower is replicated on every rank. Vision dimensions MUST NOT affect world-size selection in that case.
+
+A non-empty standard vision plan MUST validate `hidden_size`, `num_heads` or `num_attention_heads`, and `intermediate_size`. Nonstandard patch-embedding and adapter entries MUST have a complete model-type-specific validator. An unknown nonstandard plan MUST use classic execution.
+
+Static validation establishes compatibility only for known sharded dimensions. A Transformers DTensor failure during model load or generation MUST propagate as a task execution failure.
+
+## Rank Loading
+
+The selected runtime strategy MUST carry a model loader and a processor requirement independently. `AutoModelForImageTextToText` always requires `AutoProcessor`. `AutoModelForCausalLM` MUST require `AutoProcessor` for image input when a remote causal `auto_map` exists, and MUST otherwise use `AutoTokenizer`. Trusted remote mappings MUST be invoked through their declaring AutoClass.
+
+Every rank MUST load with `tp_plan="auto"`, use its explicit CUDA rank device, set the same seed, and use the same generation configuration. Rank 0 MUST log `model.tp_plan`, create the streamer when streaming, and emit the response. Nonzero ranks MUST NOT create a streamer or emit a response.
+
+After loading, every rank MUST construct the shared model adapter context and resolve the same backend-neutral artifact registry used by classic execution. Adapter matching MUST use loaded configuration identity inside the adapter module. The adapter MUST perform any required upstream model-processor registration before generation. The common rank loader MUST NOT discover or invoke a model-specific registration method directly.
+
+Persistent rank processes MUST cache one model tuple per rank. A runtime-strategy, model, dtype, or quantization key change MUST replace that tuple. A world-size change MUST recreate the rank group.
+
+## Input and Output
+
+Image and text requests MUST use the shared backend-neutral input renderer. It MUST resolve the same vision or text adapter as classic execution from the loaded adapter context and MUST pass the complete task arguments to that adapter.
+
+The standard Transformers processor adapter MUST:
 
 1. Convert canonical messages with `to_hf_chat_messages`.
-2. Invoke `processor.apply_chat_template` with generation prompt insertion, tokenization, dictionary output, and PyTorch tensors.
-3. Move every returned tensor, including token, attention, and image tensors, to the explicit current-rank CUDA device.
+2. Call `processor.apply_chat_template` with generation prompt insertion, tokenization, dictionary output, and PyTorch tensors.
+3. Pass tools and processor-supported `template_args`.
 
-Text-only VLM requests MUST use the existing prompt adapter and `processor.tokenizer`. They MUST preserve tools, `template_args`, and model-specific prompt-template behavior. Only rank 0 MAY create a streamer, while every rank MUST call generation with the same generation configuration.
+The shared renderer MUST recursively move every adapter-returned tensor, including nested token, attention, and image tensors, to the current-rank CUDA device.
 
-## Transformers 5.14.1 Coverage
+`TPRuntimeStrategy.requires_processor` MUST govern image routing. An image request without that strategy contract or without the required loaded processor MUST fail explicitly and MUST NOT enter text rendering. Text-only requests MUST use the shared text adapter and tokenizer and MUST preserve tools, tool history, `template_args`, and model-specific prompt behavior.
 
-Representative VLM families with a verified native text TP plan are Qwen2-VL, Qwen2.5-VL, Qwen3-VL-MoE, Qwen3.5, Qwen3.6, Gemma 3, Gemma 3n, Gemma 4, Llama 4, GLM-4V, GLM-4V-MoE, GLM-OCR, Mistral 4, Aria, Ovis2, ERNIE 4.5 VL MoE, DeepSeek-OCR2, InternVL, LLaVA, SmolVLM, PaliGemma, Kimi K2.5, and Cohere2 Vision.
+Non-streaming rank 0 output MUST match the canonical gpt-task response shape. Direct streaming MUST emit raw assistant deltas and one terminal finish reason. TP execution MUST NOT parse thinking or tool-call output.
 
-Representative mapped VLM families without a native text TP plan are Qwen3-VL dense, the original Idefics architecture, mLlama/Llama 3.2 Vision, BLIP, BLIP-2, Chameleon, Florence-2, and Fuyu. They MUST use classic `device_map="auto"` execution.
+## Determinism
 
-These family lists are versioned examples and MUST NOT be used as runtime allowlists. Runtime eligibility MUST be derived from the loaded Transformers config, the applicable AutoModel mapping, the effective plan, and dimension validation.
+Ranks MUST set deterministic PyTorch behavior and pin NCCL to `Ring`, `Simple`, with NVLS disabled before importing torch. CPU and disk offload MUST NOT occur.
 
-Qwen3.6-35B-A3B is represented by the `qwen3_5_moe` architecture. Its effective plan covers attention, MoE experts, the shared expert, linear attention, and the vocabulary-sharded `lm_head`. Its default `num_key_value_heads=2` permits two ranks and rejects larger world sizes. With `reduce_gpus`, a larger visible GPU set MUST reduce to K=2 when all remaining dimensions are compatible. Its vision tower has no plan and is replicated on every rank.
+Classic and TP output MUST remain in separate validation pools. Every node in one TP pool MUST use the same GPU model, world size, platform, executor marker, and fallback behavior.
 
-Static plan validation establishes compatibility only for known sharded dimensions. Runtime Transformers DTensor failures remain task execution failures and MUST propagate through the existing error path.
+## Verified Coverage
+
+Verified model samples and their exact evidence boundaries are:
+
+- [Qwen3.5](model-compatibility/qwen3.5.md)
+- [Qwen3.6](model-compatibility/qwen3.6.md)
+- [ERNIE 4.5 VL](model-compatibility/ernie-4.5-vl.md)
+- [Compatibility matrix](model-compatibility/compatibility-matrix.md)
+
+These links document coverage only. Runtime MUST NOT compare the requested model ID against them.

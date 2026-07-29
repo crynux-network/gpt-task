@@ -8,39 +8,96 @@ from typing import Any, Dict, List, Tuple
 from gpt_task import models
 from gpt_task.config import Config
 
-from .model_family import TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT
+from ..input_rendering import encode_rendered_task_input, render_task_input
+from ..model_adapters import ModelAdapterContext
+from ..model_adapters.artifacts import configure_artifacts
+from ..model_adapters.input import contains_image_blocks
+from .runtime_strategy import TPRuntimeStrategy
 
 _logger = logging.getLogger(__name__)
 
 
 def _prepare_task_inputs(
-    model_family: str,
+    strategy: TPRuntimeStrategy,
+    model_config: Any,
     processor: Any,
     tokenizer: Any,
     args: models.GPTTaskArgs,
     device: Any,
 ):
-    from ..inference import prepare_vlm_inputs
-    from ..prompt_adapters import resolve_adapter
-    from ..prompt_adapters.utils import contains_image_blocks
+    has_image_input = contains_image_blocks(args.messages)
+    if has_image_input and not strategy.requires_processor:
+        raise RuntimeError(
+            "TP runtime strategy does not provide the processor required "
+            "for image input."
+        )
+    if has_image_input and processor is None:
+        raise RuntimeError("TP image input requires a loaded processor.")
 
-    if (
-        model_family == TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT
-        and contains_image_blocks(args.messages)
-    ):
-        return prepare_vlm_inputs(processor, args.messages, device)
-
-    adapter = resolve_adapter(args.model, tokenizer)
-    input_text = adapter.render_input(args, tokenizer)
-    encoded = tokenizer(
-        input_text,
-        return_tensors="pt",
-        add_special_tokens=False,
+    context = ModelAdapterContext(
+        config=model_config,
+        processor=processor,
+        tokenizer=tokenizer,
     )
-    return {
-        key: value.to(device)
-        for key, value in encoded.items()
+    rendered = render_task_input(context, args, device)
+    return encode_rendered_task_input(rendered, tokenizer, device)
+
+
+def _load_rank_artifacts(
+    strategy: TPRuntimeStrategy,
+    args: models.GPTTaskArgs,
+    config: Config,
+    torch_dtype: Any,
+):
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoModelForImageTextToText,
+        AutoProcessor,
+        AutoTokenizer,
+    )
+
+    from .runtime_strategy import (
+        TP_MODEL_LOADER_CAUSAL_LM,
+        TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT,
+    )
+    from ..utils import load_model_kwargs
+
+    model_kwargs = load_model_kwargs(config=config)
+    load_kwargs = {
+        "trust_remote_code": True,
+        "local_files_only": config.local_files_only,
+        **model_kwargs,
     }
+
+    processor = None
+    if strategy.requires_processor:
+        processor = AutoProcessor.from_pretrained(args.model, **load_kwargs)
+        tokenizer = processor.tokenizer
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(args.model, **load_kwargs)
+
+    if strategy.model_loader == TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT:
+        model_class = AutoModelForImageTextToText
+    elif strategy.model_loader == TP_MODEL_LOADER_CAUSAL_LM:
+        model_class = AutoModelForCausalLM
+    else:
+        raise RuntimeError(f"Unsupported TP model loader: {strategy.model_loader}")
+
+    model = model_class.from_pretrained(
+        args.model,
+        tp_plan="auto",
+        dtype=torch_dtype,
+        **load_kwargs,
+    )
+    configure_artifacts(
+        ModelAdapterContext(
+            config=model.config,
+            model=model,
+            processor=processor,
+            tokenizer=tokenizer,
+        )
+    )
+    return model, tokenizer, processor
 
 
 def rank_worker_main(
@@ -88,13 +145,13 @@ def rank_worker_main(
             msg = task_queue.get()
             if msg[0] == "stop":
                 break
-            _, seq, model_family, args, config, stream = msg
+            _, seq, strategy, args, config, stream = msg
             try:
                 with error_context(local_files_only=config.local_files_only):
                     resp = _execute_task(
                         rank,
                         seq,
-                        model_family,
+                        strategy,
                         args,
                         config,
                         stream,
@@ -114,7 +171,7 @@ def rank_worker_main(
 def _execute_task(
     rank: int,
     seq: int,
-    model_family: str,
+    strategy: TPRuntimeStrategy,
     args: models.GPTTaskArgs,
     config: Config,
     stream: bool,
@@ -122,18 +179,11 @@ def _execute_task(
     model_cache: Dict[str, Tuple[Any, Any, Any]],
 ):
     import torch
-    from transformers import (
-        AutoModelForCausalLM,
-        AutoModelForImageTextToText,
-        AutoProcessor,
-        AutoTokenizer,
-        set_seed,
-    )
+    from transformers import set_seed
 
     from ..inference import TokenStreamer
     from ..key import generate_model_key
-    from ..utils import (load_model_kwargs, resolve_generation_config,
-                         use_deterministic_mode)
+    from ..utils import resolve_generation_config, use_deterministic_mode
 
     if rank == 0:
         _logger.info("TP task starts")
@@ -142,7 +192,7 @@ def _execute_task(
     use_deterministic_mode()
     set_seed(args.seed)
 
-    model_key = f"{model_family}:{generate_model_key(args)}"
+    model_key = f"{strategy!r}:{generate_model_key(args)}"
     if model_key not in model_cache:
         model_cache.clear()
         torch.cuda.empty_cache()
@@ -155,41 +205,12 @@ def _execute_task(
         elif args.dtype == "bfloat16":
             torch_dtype = torch.bfloat16
 
-        model_kwargs = load_model_kwargs(config=config)
-        local_files_only = config.local_files_only
-
-        processor = None
-        if model_family == TP_MODEL_FAMILY_IMAGE_TEXT_TO_TEXT:
-            processor = AutoProcessor.from_pretrained(
-                args.model,
-                trust_remote_code=True,
-                local_files_only=local_files_only,
-                **model_kwargs,
-            )
-            tokenizer = processor.tokenizer
-            model = AutoModelForImageTextToText.from_pretrained(
-                args.model,
-                tp_plan="auto",
-                dtype=torch_dtype,
-                trust_remote_code=True,
-                local_files_only=local_files_only,
-                **model_kwargs,
-            )
-        else:
-            tokenizer = AutoTokenizer.from_pretrained(
-                args.model,
-                trust_remote_code=True,
-                local_files_only=local_files_only,
-                **model_kwargs,
-            )
-            model = AutoModelForCausalLM.from_pretrained(
-                args.model,
-                tp_plan="auto",
-                dtype=torch_dtype,
-                trust_remote_code=True,
-                local_files_only=local_files_only,
-                **model_kwargs,
-            )
+        model, tokenizer, processor = _load_rank_artifacts(
+            strategy,
+            args,
+            config,
+            torch_dtype,
+        )
         model.eval()
         if rank == 0:
             _logger.info("Effective TP plan: %s", getattr(model, "tp_plan", None))
@@ -206,7 +227,8 @@ def _execute_task(
         resolved_generation_config.use_cache = True
 
     encoded = _prepare_task_inputs(
-        model_family,
+        strategy,
+        model.config,
         processor,
         tokenizer,
         args,

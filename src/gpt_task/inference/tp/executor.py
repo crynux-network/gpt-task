@@ -12,6 +12,7 @@ from gpt_task.config import Config
 
 from ..errors import (ModelDownloadError, ModelInvalid, ModelNotDownloaded,
                       TaskArgsInvalid, TaskExecutionError)
+from .runtime_strategy import TPRuntimeStrategy
 from .rank_worker import rank_worker_main
 
 _logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ class TPExecutor:
 
     def submit(
         self,
-        model_family: str,
+        strategy: TPRuntimeStrategy,
         args: models.GPTTaskArgs,
         config: Config,
         stream_callback: Optional[Callable] = None,
@@ -127,7 +128,7 @@ class TPExecutor:
         payload = (
             "task",
             seq,
-            model_family,
+            strategy,
             args,
             config,
             stream_callback is not None,
@@ -183,7 +184,7 @@ def shutdown_tp_executor() -> None:
 
 def submit_tp_task(
     world_size: int,
-    model_family: str,
+    strategy: TPRuntimeStrategy,
     args: models.GPTTaskArgs,
     config: Config,
     stream_callback: Optional[Callable] = None,
@@ -206,7 +207,7 @@ def submit_tp_task(
         executor = _executor
 
     try:
-        return executor.submit(model_family, args, config, stream_callback)
+        return executor.submit(strategy, args, config, stream_callback)
     except Exception as e:
         if type(e).__name__ not in _PRE_EXECUTION_ERROR_TYPES:
             with _executor_lock:

@@ -46,7 +46,7 @@ def handle_tool_call(tool_call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Handle tool calls and return the result"""
     try:
         function_name = tool_call.get("function", {}).get("name")
-        arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+        arguments = tool_call.get("function", {}).get("arguments", {})
 
         if function_name == "get_current_weather":
             return get_current_weather(**arguments)
@@ -71,7 +71,7 @@ def extract_tool_calls(response_content: str) -> List[Dict[str, Any]]:
             formatted_tool_call = {
                 "function": {
                     "name": tool_call_data.get("name", ""),
-                    "arguments": json.dumps(tool_call_data.get("arguments", {}))
+                    "arguments": tool_call_data.get("arguments", {})
                 },
                 "id": f"call_{len(tool_calls)}"
             }

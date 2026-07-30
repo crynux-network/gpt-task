@@ -12,6 +12,7 @@ from gpt_task.config import Config, get_config
 from gpt_task.cache import ModelCache
 
 from .errors import error_context
+from .executed_gpu_count import clear_executed_gpu_count, set_executed_gpu_count
 from .input_rendering import render_task_input
 from .utils import (load_model_kwargs, resolve_generation_config,
                     use_deterministic_mode)
@@ -360,6 +361,10 @@ def run_task(
 ) -> Union[models.GPTTaskResponse, models.GPTTaskStreamResponse]:
     if config is None:
         config = get_config()
+
+    clear_executed_gpu_count()
+    # Classic execution uses every visible CUDA device via device_map="auto".
+    set_executed_gpu_count(torch.cuda.device_count())
 
     with error_context(local_files_only=config.local_files_only):
         return _run_task(

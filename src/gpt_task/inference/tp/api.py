@@ -3,13 +3,14 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Mapping, Optional, Union
+from typing import Any, Callable, Dict, Literal, Mapping, Optional, Sequence, Union
 
 from gpt_task import models
 from gpt_task.cache import ModelCache
 from gpt_task.config import Config, get_config
 
 from ..errors import error_context
+from ..executed_gpu_count import clear_executed_gpu_count, set_executed_gpu_count
 from ..inference import run_task
 from ..model_adapters.input import contains_image_blocks
 from ..model_adapters.tp_plan import validate_effective_tp_plan
@@ -228,6 +229,8 @@ def run_task_tp(
     if config is None:
         config = get_config()
 
+    clear_executed_gpu_count()
+
     with error_context(local_files_only=config.local_files_only):
         if args is None:
             args = models.GPTTaskArgs.model_validate(
@@ -258,6 +261,7 @@ def run_task_tp(
             "falling back to the classic executor"
         )
         shutdown_tp_executor()
+        # run_task records visible GPU count as the classic executed count.
         return run_task(
             args,
             stream_callback=stream_callback,
@@ -273,6 +277,8 @@ def run_task_tp(
             visible_gpus,
             world_size,
         )
+
+    set_executed_gpu_count(world_size)
 
     if model_cache is not None:
         model_cache.clear()

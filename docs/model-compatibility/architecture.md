@@ -84,7 +84,7 @@ Classic execution MUST load one GPU-only pipeline keyed by model, dtype, and qua
 
 Every TP rank MUST load the same model strategy with `tp_plan="auto"` on its explicit CUDA rank. Runtime strategy, model, dtype, quantization, or world-size changes MUST invalidate incompatible cached artifacts.
 
-Classic and TP model copies MUST NOT occupy GPU memory simultaneously. TP fallback MUST shut down the rank group before classic loading, and TP execution MUST clear the worker classic cache before rank loading.
+Classic and TP model copies MUST NOT occupy GPU memory simultaneously. TP fallback MUST shut down the rank group before classic loading, and TP execution MUST clear the worker classic cache before rank loading. The owning execution coordinator MUST shut down any live TP rank group before dispatching direct classic or other non-TP GPU work on the same visible devices. Classic `run_task` MUST remain independent of TP lifecycle management. The process MUST keep exactly one GPU-resident model owner at a time while allowing same-backend cache reuse.
 
 ### Adapter or Hook Boundary
 

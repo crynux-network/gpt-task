@@ -37,6 +37,15 @@ Every value other than `reduce_gpus`, including `classic`, MUST use `device_map`
 
 Before classic fallback starts, the TP rank group MUST shut down. Before TP starts, the worker-level classic cache MUST clear. Classic and TP model copies MUST NOT occupy GPU memory simultaneously.
 
+### Single GPU-Resident Cache
+
+The inference coordinator MUST keep exactly one GPU-resident model owner at a time: the worker-level classic or SD cache, or the TP rank-group shard cache. Same-backend reuse remains allowed. Cross-backend transitions MUST evict the previous owner before the next backend loads:
+
+- Before the coordinator dispatches classic `run_task`, any live TP rank group MUST shut down through `shutdown_tp_executor()`. `run_task` MUST remain independent of TP lifecycle management.
+- Before SD inference or SD fine-tuning starts, any live TP rank group MUST shut down.
+- Before SD fine-tuning starts, the worker-level cache MUST also clear because that path loads outside the shared cache.
+- Consecutive eligible TP tasks MUST NOT shut down the rank group between tasks so compatible shards remain cached.
+
 ## Effective TP Plan
 
 The effective plan MUST include:

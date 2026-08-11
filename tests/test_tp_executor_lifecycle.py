@@ -54,6 +54,83 @@ class TPExecutorLifecycleTests(unittest.TestCase):
         submit.assert_not_called()
         run_task.assert_called_once()
 
+    def test_run_task_logs_device_map_plan(self):
+        from gpt_task.inference import inference
+
+        with (
+            patch.object(inference, "_run_task", return_value={"ok": True}),
+            patch("torch.cuda.device_count", return_value=3),
+            self.assertLogs(inference._logger, level="INFO") as logs,
+        ):
+            result = inference.run_task(
+                _args(),
+                config=Config(local_files_only=True),
+            )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertTrue(
+            any(
+                "Task execution plan: mode=device_map, gpu_count=3, "
+                "visible_gpus=3, model=test/model" in message
+                for message in logs.output
+            )
+        )
+
+    def test_run_task_tp_eligible_logs_tensor_parallel_plan(self):
+        model_cache = MagicMock()
+        resolution = api._TPTaskResolution(
+            2,
+            api.TPRuntimeStrategy(api.TP_MODEL_LOADER_CAUSAL_LM, False),
+        )
+
+        with (
+            patch.object(api, "_resolve_tp_task", return_value=resolution),
+            patch.object(api, "shutdown_tp_executor") as shutdown,
+            patch.object(api, "submit_tp_task", return_value={"ok": True}) as submit,
+            patch("torch.cuda.device_count", return_value=2),
+            self.assertLogs(api._logger, level="INFO") as logs,
+        ):
+            result = api.run_task_tp(
+                _args(),
+                model_cache=model_cache,
+                config=Config(local_files_only=True),
+            )
+
+        self.assertEqual(result, {"ok": True})
+        model_cache.clear.assert_called_once()
+        shutdown.assert_not_called()
+        submit.assert_called_once()
+        self.assertTrue(
+            any(
+                "Task execution plan: mode=tensor_parallel, gpu_count=2, "
+                "visible_gpus=2, model=test/model" in message
+                for message in logs.output
+            )
+        )
+
+    def test_run_task_tp_reduce_gpus_logs_reduced_world_size(self):
+        resolution = api._TPTaskResolution(
+            2,
+            api.TPRuntimeStrategy(api.TP_MODEL_LOADER_CAUSAL_LM, False),
+        )
+
+        with (
+            patch.object(api, "_resolve_tp_task", return_value=resolution),
+            patch.object(api, "submit_tp_task", return_value={"ok": True}),
+            patch("torch.cuda.device_count", return_value=4),
+            self.assertLogs(api._logger, level="INFO") as logs,
+        ):
+            result = api.run_task_tp(_args(), config=Config(local_files_only=True))
+
+        self.assertEqual(result, {"ok": True})
+        self.assertTrue(
+            any(
+                "Task execution plan: mode=tensor_parallel, gpu_count=2, "
+                "visible_gpus=4, model=test/model" in message
+                for message in logs.output
+            )
+        )
+
     def test_run_task_tp_eligible_clears_worker_cache_without_shutdown(self):
         model_cache = MagicMock()
         resolution = api._TPTaskResolution(

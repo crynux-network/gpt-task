@@ -256,12 +256,9 @@ def run_task_tp(
     # model load does not compete with the cached shards, and a TP task
     # evicts the worker-level cache before the rank group loads shards.
     if resolution is None:
-        _logger.info(
-            "Task is not eligible for tensor parallelism, "
-            "falling back to the classic executor"
-        )
         shutdown_tp_executor()
-        # run_task records visible GPU count as the classic executed count.
+        # run_task records visible GPU count as the classic executed count
+        # and logs the final device_map execution plan.
         return run_task(
             args,
             stream_callback=stream_callback,
@@ -270,15 +267,14 @@ def run_task_tp(
         )
 
     world_size = resolution.world_size
-    if world_size < visible_gpus:
-        _logger.info(
-            "TP-sharded dimensions are not divisible by %d visible GPUs; "
-            "reducing tensor parallel world size to %d",
-            visible_gpus,
-            world_size,
-        )
-
     set_executed_gpu_count(world_size)
+    _logger.info(
+        "Task execution plan: mode=%s, gpu_count=%d, visible_gpus=%d, model=%s",
+        "tensor_parallel",
+        world_size,
+        visible_gpus,
+        args.model,
+    )
 
     if model_cache is not None:
         model_cache.clear()

@@ -364,7 +364,16 @@ def run_task(
 
     clear_executed_gpu_count()
     # Classic execution uses every visible CUDA device via device_map="auto".
-    set_executed_gpu_count(torch.cuda.device_count())
+    visible_gpus = torch.cuda.device_count()
+    set_executed_gpu_count(visible_gpus)
+    model_name = args.model if args is not None else model
+    _logger.info(
+        "Task execution plan: mode=%s, gpu_count=%d, visible_gpus=%d, model=%s",
+        "device_map",
+        visible_gpus,
+        visible_gpus,
+        model_name,
+    )
 
     with error_context(local_files_only=config.local_files_only):
         return _run_task(

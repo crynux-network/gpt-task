@@ -8,10 +8,12 @@ from typing import Any, Dict, List, Tuple
 from gpt_task import models
 from gpt_task.config import Config
 
+from ..execution_dtype import resolve_model_execution_dtype
 from ..input_rendering import encode_rendered_task_input, render_task_input
 from ..model_adapters import ModelAdapterContext
 from ..model_adapters.artifacts import configure_artifacts
 from ..model_adapters.input import contains_image_blocks
+from .result import TPTaskResult
 from .runtime_strategy import TPRuntimeStrategy
 
 _logger = logging.getLogger(__name__)
@@ -217,6 +219,7 @@ def _execute_task(
         model_cache[model_key] = (model, tokenizer, processor)
 
     model, tokenizer, processor = model_cache[model_key]
+    execution_dtype = resolve_model_execution_dtype(model)
 
     resolved_generation_config = resolve_generation_config(
         model.generation_config, args
@@ -252,10 +255,14 @@ def _execute_task(
             streamer=streamer,
         )
 
-    if rank != 0 or stream:
+    if rank != 0:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         return None
+    if stream:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return TPTaskResult(response=None, execution_dtype=execution_dtype)
 
     prompt_tokens = len(input_tokens)
     sequences: List[List[int]] = [
@@ -301,4 +308,4 @@ def _execute_task(
 
     _logger.info(f"task response: {resp}")
     _logger.info("TP text generation completes")
-    return resp
+    return TPTaskResult(response=resp, execution_dtype=execution_dtype)

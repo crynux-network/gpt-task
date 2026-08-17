@@ -83,6 +83,8 @@ After loading, every rank MUST construct the shared model adapter context and re
 
 Persistent rank processes MUST cache one model tuple per rank. A runtime-strategy, model, dtype, or quantization key change MUST replace that tuple. A world-size change MUST recreate the rank group.
 
+Each task, including a shard-cache hit, MUST read the loaded main model's parameter dtype. Rank 0 MUST include its normalized PyTorch name in the internal result sent to the parent process. The parent process MUST publish that dtype as execution metadata and MUST return the raw assistant response without adding the metadata to it. Classic fallback MUST use the loaded classic pipeline model's dtype.
+
 ## Input and Output
 
 Image and text requests MUST use the shared backend-neutral input renderer. It MUST resolve the same vision or text adapter as classic execution from the loaded adapter context and MUST pass the complete task arguments to that adapter.

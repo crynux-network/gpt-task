@@ -300,6 +300,7 @@ class VLMInputTests(unittest.TestCase):
         tokenizer.eos_token_id = 3
         tokenizer.decode.return_value = "answer"
         model = Mock()
+        model.dtype = torch.float16
         model.device = torch.device("cpu")
         model.generation_config = Mock()
         model.generate.return_value = torch.tensor([[1, 2, 3]])

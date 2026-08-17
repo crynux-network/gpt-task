@@ -86,6 +86,8 @@ Every TP rank MUST load the same model strategy with `tp_plan="auto"` on its exp
 
 Classic and TP model copies MUST NOT occupy GPU memory simultaneously. TP fallback MUST shut down the rank group before classic loading, and TP execution MUST clear the worker classic cache before rank loading. The owning execution coordinator MUST shut down any live TP rank group before dispatching direct classic or other non-TP GPU work on the same visible devices. Classic `run_task` MUST remain independent of TP lifecycle management. The process MUST keep exactly one GPU-resident model owner at a time while allowing same-backend cache reuse.
 
+After each load or cache reuse, the backend MUST read the loaded main model's parameter dtype and expose its normalized PyTorch name as task execution metadata. Classic execution MUST publish this metadata from the selected pipeline model. TP rank 0 MUST return the dtype with the internal rank result, and the parent process MUST publish it before returning the public task response. TP fallback MUST publish the classic model's dtype. The dtype metadata MUST remain separate from the raw assistant response contract.
+
 ### Adapter or Hook Boundary
 
 After either backend loads its artifacts, it MUST construct the same adapter context from the loaded model configuration, model, processor, and tokenizer. It MUST resolve and invoke the shared artifact registry. An artifact adapter MAY configure a nonstandard model-processor relationship. The standard adapter MUST leave artifacts unchanged. Backend loaders MUST NOT discover or invoke model-specific methods directly.

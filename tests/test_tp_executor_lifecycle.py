@@ -2,7 +2,10 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from gpt_task.config import Config
+from gpt_task.inference import get_execution_dtype
+from gpt_task.inference.execution_dtype import set_execution_dtype
 from gpt_task.inference.tp import api, executor, shutdown_tp_executor
+from gpt_task.inference.tp.result import TPTaskResult
 from gpt_task.models import GPTTaskArgs
 
 
@@ -38,6 +41,7 @@ class TPExecutorLifecycleTests(unittest.TestCase):
 
         def record_classic(*args, **kwargs):
             order.append("classic")
+            set_execution_dtype("bfloat16")
             return {"ok": True}
 
         with (
@@ -50,6 +54,7 @@ class TPExecutorLifecycleTests(unittest.TestCase):
             result = api.run_task_tp(_args(), config=Config(local_files_only=True))
 
         self.assertEqual(result, {"ok": True})
+        self.assertEqual(get_execution_dtype(), "bfloat16")
         self.assertEqual(order, ["shutdown", "classic"])
         submit.assert_not_called()
         run_task.assert_called_once()
@@ -86,7 +91,14 @@ class TPExecutorLifecycleTests(unittest.TestCase):
         with (
             patch.object(api, "_resolve_tp_task", return_value=resolution),
             patch.object(api, "shutdown_tp_executor") as shutdown,
-            patch.object(api, "submit_tp_task", return_value={"ok": True}) as submit,
+            patch.object(
+                api,
+                "submit_tp_task",
+                return_value=TPTaskResult(
+                    response={"ok": True},
+                    execution_dtype="float16",
+                ),
+            ) as submit,
             patch("torch.cuda.device_count", return_value=2),
             self.assertLogs(api._logger, level="INFO") as logs,
         ):
@@ -97,6 +109,7 @@ class TPExecutorLifecycleTests(unittest.TestCase):
             )
 
         self.assertEqual(result, {"ok": True})
+        self.assertEqual(get_execution_dtype(), "float16")
         model_cache.clear.assert_called_once()
         shutdown.assert_not_called()
         submit.assert_called_once()
@@ -116,13 +129,21 @@ class TPExecutorLifecycleTests(unittest.TestCase):
 
         with (
             patch.object(api, "_resolve_tp_task", return_value=resolution),
-            patch.object(api, "submit_tp_task", return_value={"ok": True}),
+            patch.object(
+                api,
+                "submit_tp_task",
+                return_value=TPTaskResult(
+                    response={"ok": True},
+                    execution_dtype="float32",
+                ),
+            ),
             patch("torch.cuda.device_count", return_value=4),
             self.assertLogs(api._logger, level="INFO") as logs,
         ):
             result = api.run_task_tp(_args(), config=Config(local_files_only=True))
 
         self.assertEqual(result, {"ok": True})
+        self.assertEqual(get_execution_dtype(), "float32")
         self.assertTrue(
             any(
                 "Task execution plan: mode=tensor_parallel, gpu_count=2, "
@@ -141,7 +162,14 @@ class TPExecutorLifecycleTests(unittest.TestCase):
         with (
             patch.object(api, "_resolve_tp_task", return_value=resolution),
             patch.object(api, "shutdown_tp_executor") as shutdown,
-            patch.object(api, "submit_tp_task", return_value={"ok": True}) as submit,
+            patch.object(
+                api,
+                "submit_tp_task",
+                return_value=TPTaskResult(
+                    response={"ok": True},
+                    execution_dtype="float16",
+                ),
+            ) as submit,
             patch("torch.cuda.device_count", return_value=2),
         ):
             result = api.run_task_tp(

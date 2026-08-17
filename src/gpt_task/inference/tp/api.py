@@ -11,11 +11,13 @@ from gpt_task.config import Config, get_config
 
 from ..errors import error_context
 from ..executed_gpu_count import clear_executed_gpu_count, set_executed_gpu_count
+from ..execution_dtype import clear_execution_dtype, set_execution_dtype
 from ..inference import run_task
 from ..model_adapters.input import contains_image_blocks
 from ..model_adapters.tp_plan import validate_effective_tp_plan
 from ..utils import load_model_kwargs
 from .executor import shutdown_tp_executor, submit_tp_task
+from .result import TPTaskResult
 from .runtime_strategy import (
     TP_MODEL_LOADER_CAUSAL_LM,
     TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT,
@@ -230,6 +232,7 @@ def run_task_tp(
         config = get_config()
 
     clear_executed_gpu_count()
+    clear_execution_dtype()
 
     with error_context(local_files_only=config.local_files_only):
         if args is None:
@@ -279,10 +282,14 @@ def run_task_tp(
     if model_cache is not None:
         model_cache.clear()
 
-    return submit_tp_task(
+    result = submit_tp_task(
         world_size,
         resolution.strategy,
         args,
         config,
         stream_callback,
     )
+    if not isinstance(result, TPTaskResult):
+        raise RuntimeError("Tensor-parallel executor returned an invalid result.")
+    set_execution_dtype(result.execution_dtype)
+    return result.response

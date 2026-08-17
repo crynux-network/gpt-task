@@ -13,6 +13,11 @@ from gpt_task.cache import ModelCache
 
 from .errors import error_context
 from .executed_gpu_count import clear_executed_gpu_count, set_executed_gpu_count
+from .execution_dtype import (
+    clear_execution_dtype,
+    resolve_model_execution_dtype,
+    set_execution_dtype,
+)
 from .input_rendering import render_task_input
 from .utils import (load_model_kwargs, resolve_generation_config,
                     use_deterministic_mode)
@@ -363,6 +368,7 @@ def run_task(
         config = get_config()
 
     clear_executed_gpu_count()
+    clear_execution_dtype()
     # Classic execution uses every visible CUDA device via device_map="auto".
     visible_gpus = torch.cuda.device_count()
     set_executed_gpu_count(visible_gpus)
@@ -532,6 +538,7 @@ def _run_task(
     else:
         pipe = model_loader()
 
+    set_execution_dtype(resolve_model_execution_dtype(pipe.model))
     tokenizer = _resolve_pipeline_tokenizer(pipe)
     assert tokenizer is not None
 

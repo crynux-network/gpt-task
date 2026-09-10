@@ -9,6 +9,10 @@ from gpt_task import models
 from gpt_task.config import Config
 
 from ..execution_dtype import resolve_model_execution_dtype
+from ..generation_constraints import (
+    build_generation_logits_processors,
+    constrain_generation_config,
+)
 from ..input_rendering import encode_rendered_task_input, render_task_input
 from ..model_adapters import ModelAdapterContext
 from ..model_adapters.artifacts import configure_artifacts
@@ -224,6 +228,19 @@ def _execute_task(
     resolved_generation_config = resolve_generation_config(
         model.generation_config, args
     )
+    logits_processors = build_generation_logits_processors(
+        ModelAdapterContext(
+            config=model.config,
+            model=model,
+            processor=processor,
+            tokenizer=tokenizer,
+        ),
+        args,
+    )
+    constrain_generation_config(
+        resolved_generation_config,
+        bool(logits_processors),
+    )
     if resolved_generation_config.pad_token_id is None:
         resolved_generation_config.pad_token_id = tokenizer.eos_token_id
     if stream:
@@ -253,6 +270,7 @@ def _execute_task(
             **encoded,
             generation_config=resolved_generation_config,
             streamer=streamer,
+            logits_processor=logits_processors,
         )
 
     if rank != 0:

@@ -28,9 +28,8 @@ def apply_chat_template(
     template_args: Dict[str, Any],
     optional_args: Optional[Dict[str, Any]] = None,
 ) -> str:
-    merged_args = dict(template_args)
-    if optional_args:
-        merged_args.update(optional_args)
+    merged_args = dict(optional_args or {})
+    merged_args.update(template_args)
 
     try:
         return tokenizer.apply_chat_template(chats, **merged_args)
@@ -40,6 +39,8 @@ def apply_chat_template(
 
     retry_args = dict(template_args)
     for key, value in optional_args.items():
+        if key in template_args:
+            continue
         retry_args[key] = value
         try:
             return tokenizer.apply_chat_template(chats, **retry_args)

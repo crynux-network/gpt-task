@@ -59,6 +59,39 @@ class TPExecutorLifecycleTests(unittest.TestCase):
         submit.assert_not_called()
         run_task.assert_called_once()
 
+    def test_run_task_tp_keyword_api_preserves_structured_fields(self):
+        captured = {}
+
+        def resolve(args, config, visible_gpus):
+            captured["args"] = args
+            return None
+
+        with (
+            patch.object(api, "_resolve_tp_task", side_effect=resolve),
+            patch.object(api, "shutdown_tp_executor"),
+            patch.object(api, "run_task", return_value={"ok": True}),
+            patch("torch.cuda.device_count", return_value=1),
+        ):
+            api.run_task_tp(
+                model="test/model",
+                messages=[{"role": "user", "content": "hello"}],
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {"name": "lookup"},
+                    }
+                ],
+                tool_choice="required",
+                response_format={"type": "json_object"},
+                config=Config(local_files_only=True),
+            )
+
+        self.assertEqual(captured["args"].tool_choice, "required")
+        self.assertEqual(
+            captured["args"].response_format,
+            {"type": "json_object"},
+        )
+
     def test_run_task_logs_device_map_plan(self):
         from gpt_task.inference import inference
 

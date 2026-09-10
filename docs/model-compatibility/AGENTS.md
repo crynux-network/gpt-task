@@ -22,7 +22,7 @@ Classic and tensor-parallel execution MUST remain backend strategies inside the 
 
 Every implemented stage registry MUST use ordered adapters and a standard Transformers fallback. Stage 1, Stage 5, and Stage 6 hook contracts MUST remain documented even when no nonstandard implementation exists; empty hook packages MUST NOT be created.
 
-OpenAI-compatible request conversion, Relay and Node transport, and raw-output conversion into public API responses are specified by `crynux-bridge/docs/model-compatibility/`. This directory MUST NOT redefine those API transformations.
+Crynux AS OpenAI-compatible request conversion and raw-output conversion into public API responses are specified by `crynux-as/docs/model-compatibility/`. Bridge legacy endpoint conversion and raw-task transport boundaries are specified by `crynux-bridge/docs/model-compatibility/`. This directory MUST NOT redefine those API transformations.
 
 ## Update Requirements
 

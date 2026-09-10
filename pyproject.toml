@@ -9,7 +9,7 @@ description = "A general framework to define and execute the GPT text generation
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = ["Programming Language :: Python :: 3"]
-version = "3.2.0"
+version = "3.6.0"
 dependencies = [
     "numpy",
     "scipy",
@@ -21,7 +21,8 @@ dependencies = [
     "tiktoken",
     "einops",
     "pydantic",
-    "pydantic-settings"
+    "pydantic-settings",
+    "xgrammar==0.2.6"
 ]
 
 [tool.setuptools.packages.find]

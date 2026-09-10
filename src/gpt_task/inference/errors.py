@@ -74,6 +74,8 @@ def error_context(local_files_only: bool = False):
         yield
     except ValidationError as e:
         raise TaskArgsInvalid from e
+    except TaskArgsInvalid:
+        raise
     except EnvironmentError as e:
         # In local_files_only mode every model load failure caused by a
         # missing local cache entry is a not-downloaded model; invalid model

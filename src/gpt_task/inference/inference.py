@@ -18,6 +18,10 @@ from .execution_dtype import (
     resolve_model_execution_dtype,
     set_execution_dtype,
 )
+from .generation_constraints import (
+    build_generation_logits_processors,
+    constrain_generation_config,
+)
 from .input_rendering import render_task_input
 from .utils import (load_model_kwargs, resolve_generation_config,
                     use_deterministic_mode)
@@ -269,6 +273,7 @@ def _invoke_pipeline(
     *,
     return_tensors: bool = False,
     streamer: BaseStreamer | None = None,
+    logits_processor: List[Any] | None = None,
 ) -> Any:
     call_kwargs: Dict[str, Any] = {}
     if return_tensors:
@@ -286,15 +291,23 @@ def _invoke_pipeline(
     pipe.generation_config = generation_config
 
     try:
+        generate_kwargs: Dict[str, Any] = {}
         if streamer is not None:
             # streamer is a runtime arg for model.generate(), not part of
             # GenerationConfig. TextGenerationPipeline accepts it as a flat
             # kwarg; ImageTextToTextPipeline requires it inside a
             # generate_kwargs dict — an upstream API inconsistency.
             if _is_vlm_pipeline(pipe):
-                call_kwargs["generate_kwargs"] = {"streamer": streamer}
+                generate_kwargs["streamer"] = streamer
             else:
                 call_kwargs["streamer"] = streamer
+        if logits_processor:
+            if _is_vlm_pipeline(pipe):
+                generate_kwargs["logits_processor"] = logits_processor
+            else:
+                call_kwargs["logits_processor"] = logits_processor
+        if generate_kwargs:
+            call_kwargs["generate_kwargs"] = generate_kwargs
         return pipe(inputs, **call_kwargs)
     finally:
         pipe.generation_config = saved_generation_config
@@ -355,6 +368,8 @@ def run_task(
     model: str | None = None,
     messages: Sequence[models.Message | Mapping[str, Any]] | None = None,
     tools: Sequence[Dict[str, Any]] | None = None,
+    tool_choice: models.ToolChoice | None = None,
+    response_format: models.ResponseFormat | None = None,
     generation_config: models.GPTGenerationConfig | Mapping[str, Any] | None = None,
     template_args: Mapping[str, Any] | None = None,
     stream_callback: Callable[[models.GPTTaskStreamResponse], None] | None = None,
@@ -387,6 +402,8 @@ def run_task(
             model=model,
             messages=messages,
             tools=tools,
+            tool_choice=tool_choice,
+            response_format=response_format,
             generation_config=generation_config,
             template_args=template_args,
             stream_callback=stream_callback,
@@ -404,6 +421,8 @@ def _run_task(
     model: str | None = None,
     messages: Sequence[models.Message | Mapping[str, Any]] | None = None,
     tools: Sequence[Dict[str, Any]] | None = None,
+    tool_choice: models.ToolChoice | None = None,
+    response_format: models.ResponseFormat | None = None,
     generation_config: models.GPTGenerationConfig | Mapping[str, Any] | None = None,
     template_args: Mapping[str, Any] | None = None,
     stream_callback: Callable[[models.GPTTaskStreamResponse], None] | None = None,
@@ -424,6 +443,8 @@ def _run_task(
                 "model": model,
                 "messages": messages,
                 "tools": tools,
+                "tool_choice": tool_choice,
+                "response_format": response_format,
                 "generation_config": generation_config,
                 "template_args": template_args,
                 "seed": seed,
@@ -554,6 +575,14 @@ def _run_task(
         processor=getattr(pipe, "processor", None),
         tokenizer=tokenizer,
     )
+    logits_processors = build_generation_logits_processors(
+        adapter_context,
+        args,
+    )
+    constrain_generation_config(
+        resolved_generation_config,
+        bool(logits_processors),
+    )
     rendered_input = render_task_input(
         adapter_context,
         args,
@@ -587,6 +616,7 @@ def _run_task(
                     **encoded_vlm,
                     generation_config=resolved_generation_config,
                     streamer=streamer,
+                    logits_processor=logits_processors,
                 )
         else:
             _invoke_pipeline(
@@ -594,6 +624,7 @@ def _run_task(
                 inputs,
                 resolved_generation_config,
                 streamer=streamer,
+                logits_processor=logits_processors,
             )
 
         if torch.cuda.is_available():
@@ -612,6 +643,7 @@ def _run_task(
             output = pipe.model.generate(
                 **encoded_vlm,
                 generation_config=resolved_generation_config,
+                logits_processor=logits_processors,
             )
         _logger.debug(f"Raw output: {output}")
         for sequence in output.tolist():
@@ -627,6 +659,7 @@ def _run_task(
             inputs,
             resolved_generation_config,
             return_tensors=True,
+            logits_processor=logits_processors,
         )
         assert output is not None
         assert isinstance(output, list)

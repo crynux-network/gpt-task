@@ -39,6 +39,8 @@ class ErnieVisionInputAdapter:
         tools = copy_tools(args.tools)
         if tools is not None:
             template_args["tools"] = tools
+        if args.tool_choice is not None:
+            template_args["tool_choice"] = args.tool_choice
 
         prompt = apply_chat_template(
             tokenizer=processor,

@@ -24,12 +24,16 @@ The input is JSON or programmatic arguments. The output is a validated `GPTTaskA
 - ordered `system`, `user`, `assistant`, and `tool` messages;
 - string, text-block, and raw-base64 image-block content;
 - optional tools and tool history;
+- optional `tool_choice` with `none`, `auto`, `required`, or one declared named function;
+- optional `response_format` with `json_object` or `json_schema`;
 - generation configuration and template arguments;
 - seed, dtype, and quantization controls.
 
 Canonical image blocks MUST contain valid raw base64 and MUST NOT contain `image_url`, a data URL prefix, or additional fields.
 
 The runtime MUST enable deterministic PyTorch behavior and set the task seed before model execution. Validation failures MUST become task-argument errors rather than model execution errors.
+
+Canonical task objects MUST reject unknown top-level fields. Tool names MUST be unique, and a named choice MUST reference exactly one declared function. Each tool parameter schema and response schema MUST be valid JSON data, MUST be at most 65,536 UTF-8 bytes, MUST have nesting depth at most 32, and MUST contain at most 1,024 declared properties.
 
 ### Adapter or Hook Boundary
 
@@ -129,6 +133,8 @@ Processor-only representations MUST NOT replace canonical task data. Every visio
 
 Tools, assistant tool-call history, tool results, and compatible template arguments MUST reach the selected adapter or processor in canonical order.
 
+The generic tokenizer and processor paths MUST pass canonical `tool_choice` as a chat-template argument when it is present. A family adapter MUST decide whether and how its verified interface consumes that value. Core rendering code MUST NOT convert the choice into model-specific tags.
+
 The generic Transformers tokenizer and processor paths MUST receive object-valued `function.arguments` in assistant tool history. This is the Transformers chat-template contract. A registered family adapter MAY require a different representation when its authoritative upstream interface defines one; the DeepSeek-V3.2 encoder requires a JSON string and expands it with `json.loads`.
 
 gpt-task MUST preserve the representation supplied in `GPTTaskArgs` and MUST NOT infer whether a template expects an object or string by trial rendering. OpenAI-compatible string-to-object adaptation belongs to the upstream API boundary.
@@ -157,13 +163,29 @@ This stage executes model generation with one resolved generation configuration.
 
 Task generation overrides MUST be merged with the loaded model generation defaults. Classic and TP paths MUST preserve the same task-level generation semantics.
 
+Stage 5 MUST resolve constraints through an independent ordered `GenerationAdapterRegistry` with a standard Transformers fallback. A generation adapter MUST match loaded configuration identity or tokenizer capability. Core generation and registry modules MUST NOT select a format from the request model ID.
+
+`response_format=json_object` MUST compile the XGrammar built-in JSON grammar. `response_format=json_schema` MUST compile its JSON Schema. These response constraints MUST use the loaded tokenizer and MUST NOT select a model-family tool adapter.
+
+Tool constraints MUST apply for `required`, a named function, and `auto` with at least one `strict=true` tool. `none`, and `auto` without a strict tool, MUST NOT add a tool constraint. Tools MUST still reach Stage 4 when the choice is `none`. A tool constraint MUST take precedence over `response_format`.
+
+The tool generation registry MUST support `llama`, `kimi`, `deepseek_r1`, `deepseek_v3_1`, `deepseek_v3_2`, `deepseek_v4`, `qwen_3`, `qwen_3_coder`, `qwen_3_5`, `glm_4_7`, `hermes`, `hy_v4`, and `kimi_k3`. XGrammar built-ins MUST own the first ten formats. The `hermes`, `hy_v4`, and `kimi_k3` builders MUST retain the Apache-2.0 behavior from vLLM commit `588a813a60448f6f71dfa0e0ecd52cc0bacc7329` and MUST retain source attribution.
+
+Tokenizer information and compiled grammars MAY be cached. Every generation invocation MUST create a new XGrammar Transformers logits processor so each returned sequence owns independent matcher state. Constraint compilation MUST complete within five seconds. Invalid schema syntax, unsupported model format, tokenizer incompatibility, and compilation timeout MUST become task-argument errors and MUST NOT fall back to unconstrained generation.
+
+Constrained generation MUST set `num_beams=1`. Multiple return sequences MUST use one independent matcher per sequence.
+
 ### Classic Execution
 
 Classic execution MUST invoke the pipeline or model with the rendered text or multimodal tensors.
 
+Text pipeline, multimodal `model.generate`, and direct streaming MUST receive the same resolved logits processor list.
+
 ### Tensor-Parallel Execution
 
 Every TP rank MUST execute the same inputs and generation configuration. Rank 0 MUST own streaming and response emission; nonzero ranks MUST participate in generation without emitting output.
+
+Every TP rank MUST build the same grammar from the same tokenizer contract and apply the logits processor to its complete vocabulary logits.
 
 ### Adapter or Hook Boundary
 
@@ -204,6 +226,8 @@ A decode hook MAY specialize token decoding for a verified model interface. It M
 Classic and TP execution MUST consume equivalent canonical messages, tools, template arguments, and generation settings.
 
 Stage 1 validation and Stage 4 input contracts are shared. Stages 2 and 3 use backend-specific loading strategies with the same model adapter identity. Stage 5 uses backend-specific invocation through one generation contract. Stage 6 preserves one raw-output contract. Artifact, text, vision, generation, and decode hooks apply to both backends whenever required; TP-plan validators apply only to TP eligibility.
+
+Classic, streaming, multimodal, and TP invocation MUST apply equivalent structured-output constraints. This equivalence does not establish model-specific output quality or numeric equivalence across backend validation pools.
 
 Classic and TP results MUST remain in separate validation pools because their floating-point operation order differs. Nodes in one TP pool MUST use the same GPU model, world size, platform, executor marker, and fallback configuration.
 

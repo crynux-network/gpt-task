@@ -175,6 +175,8 @@ Tokenizer information and compiled grammars MAY be cached. Every generation invo
 
 Constrained generation MUST set `num_beams=1`. Multiple return sequences MUST use one independent matcher per sequence.
 
+CUDA constrained generation MUST provide a Triton package that matches the installed PyTorch release and platform. On Linux that package MUST be the standard `triton` dependency selected by PyTorch. On Windows that package MUST be `triton-windows`. Unconstrained generation MUST NOT require Triton.
+
 ### Classic Execution
 
 Classic execution MUST invoke the pipeline or model with the rendered text or multimodal tensors.

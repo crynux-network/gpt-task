@@ -15,3 +15,4 @@ pydantic-settings==2.6.1
 xgrammar==0.2.6
 huggingface_hub==1.24.0
 python-dotenv==1.0.1
+triton-windows>=3.7,<3.8; sys_platform == "win32"

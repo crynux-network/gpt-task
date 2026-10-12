@@ -23,6 +23,12 @@ res = run_task(
     messages=messages,
     generation_config={"max_new_tokens": 32768},
     seed=42,
-    quantize_bits=4,
+    quantization_config={
+        "quant_method": "bitsandbytes",
+        "quant_kwargs": {
+            "load_in_4bit": True,
+            "bnb_4bit_quant_type": "nf4",
+        },
+    },
 )
 print(res)

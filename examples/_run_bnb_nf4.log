@@ -1,0 +1,160 @@
+[2026-10-12 17:31:29] [INFO    ] gpt_task.inference.inference: Task execution plan: mode=device_map, gpu_count=1, visible_gpus=1, model=Qwen/Qwen2.5-14B-Instruct
+[2026-10-12 17:31:29] [INFO    ] gpt_task.inference.inference: Task starts
+[2026-10-12 17:31:29] [INFO    ] gpt_task.inference.inference: task args: model='Qwen/Qwen2.5-14B-Instruct' messages=[{'role': 'user', 'content': 'Say hello in one sentence.'}] tools=None tool_choice=None response_format=None generation_config={'max_new_tokens': 64} template_args=None seed=42 dtype='bfloat16' quantization_config=QuantizationConfig(quant_method='bitsandbytes', quant_kwargs={'load_in_4bit': True, 'bnb_4bit_quant_type': 'nf4', 'bnb_4bit_compute_dtype': 'bfloat16', 'bnb_4bit_use_double_quant': False})
+[2026-10-12 17:31:35] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct "HTTP/1.1 200 OK"
+[2026-10-12 17:31:36] [INFO    ] gpt_task.inference.inference: Start loading pipeline
+[2026-10-12 17:31:36] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct "HTTP/1.1 200 OK"
+[2026-10-12 17:31:36] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
+[2026-10-12 17:31:37] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct/tree/main?recursive=true&expand=false "HTTP/1.1 200 OK"
+[2026-10-12 17:31:37] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct "HTTP/1.1 200 OK"
+[2026-10-12 17:31:37] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct "HTTP/1.1 200 OK"
+[2026-10-12 17:31:38] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct "HTTP/1.1 200 OK"
+
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s][2026-10-12 17:31:38] [INFO    ] httpx: HTTP Request: HEAD https://huggingface.co/Qwen/Qwen2.5-14B-Instruct/resolve/cf98f3b3bbb457ad9e2bb7baf9a0125b6b88caa8/model-00002-of-00008.safetensors "HTTP/1.1 302 Found"
+[2026-10-12 17:31:42] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct/xet-read-token/cf98f3b3bbb457ad9e2bb7baf9a0125b6b88caa8 "HTTP/1.1 200 OK"
+[2026-10-12 17:31:42] [INFO    ] httpx: HTTP Request: HEAD https://huggingface.co/Qwen/Qwen2.5-14B-Instruct/resolve/cf98f3b3bbb457ad9e2bb7baf9a0125b6b88caa8/model-00003-of-00008.safetensors "HTTP/1.1 302 Found"
+
+Fetching 8 files:  62%|██████▎   | 5/8 [01:50<01:06, 22.02s/it]
+Fetching 8 files:  75%|███████▌  | 6/8 [02:07<00:41, 20.93s/it]
+Fetching 8 files:  88%|████████▊ | 7/8 [02:08<00:16, 16.22s/it]
+Fetching 8 files: 100%|██████████| 8/8 [02:09<00:00, 12.42s/it]
+Fetching 8 files: 100%|██████████| 8/8 [02:09<00:00, 16.25s/it]
+
+Loading weights:   0%|          | 0/579 [00:00<?, ?it/s]
+Loading weights:   0%|          | 1/579 [00:01<10:29,  1.09s/it]
+Loading weights:   0%|          | 2/579 [00:02<10:12,  1.06s/it]
+Loading weights:   1%|          | 4/579 [00:02<04:10,  2.29it/s]
+Loading weights:   1%|          | 6/579 [00:02<02:33,  3.73it/s]
+Loading weights:   3%|▎         | 16/579 [00:02<00:41, 13.64it/s]
+Loading weights:   3%|▎         | 19/579 [00:02<00:38, 14.63it/s]
+Loading weights:   5%|▍         | 28/579 [00:02<00:23, 23.83it/s]
+Loading weights:   6%|▌         | 32/579 [00:03<00:22, 24.08it/s]
+Loading weights:   7%|▋         | 40/579 [00:03<00:17, 31.00it/s]
+Loading weights:   8%|▊         | 44/579 [00:03<00:18, 29.39it/s]
+Loading weights:   9%|▉         | 52/579 [00:03<00:14, 35.38it/s]
+Loading weights:  10%|▉         | 56/579 [00:03<00:16, 32.39it/s]
+Loading weights:  11%|█         | 64/579 [00:03<00:13, 37.89it/s]
+Loading weights:  12%|█▏        | 69/579 [00:04<00:14, 35.54it/s]
+Loading weights:  13%|█▎        | 76/579 [00:04<00:12, 39.20it/s]
+Loading weights:  14%|█▍        | 81/579 [00:04<00:13, 36.47it/s]
+Loading weights:  15%|█▌        | 88/579 [00:04<00:12, 39.56it/s]
+Loading weights:  16%|█▌        | 93/579 [00:04<00:13, 36.80it/s]
+Loading weights:  17%|█▋        | 100/579 [00:04<00:12, 37.69it/s]
+Loading weights:  18%|█▊        | 104/579 [00:04<00:15, 31.66it/s]
+Loading weights:  19%|█▉        | 112/579 [00:05<00:13, 34.43it/s]
+Loading weights:  20%|██        | 116/579 [00:05<00:15, 29.98it/s]
+Loading weights:  21%|██▏       | 124/579 [00:05<00:13, 34.95it/s]
+Loading weights:  22%|██▏       | 128/579 [00:05<00:13, 32.61it/s]
+Loading weights:  23%|██▎       | 136/579 [00:05<00:11, 38.22it/s]
+Loading weights:  24%|██▍       | 140/579 [00:06<00:12, 34.59it/s]
+Loading weights:  26%|██▌       | 148/579 [00:06<00:10, 39.89it/s]
+Loading weights:  26%|██▋       | 153/579 [00:06<00:11, 36.76it/s]
+Loading weights:  28%|██▊       | 160/579 [00:06<00:10, 39.96it/s]
+Loading weights:  28%|██▊       | 165/579 [00:06<00:11, 37.35it/s]
+Loading weights:  30%|██▉       | 172/579 [00:06<00:09, 40.79it/s]
+Loading weights:  31%|███       | 177/579 [00:06<00:10, 37.57it/s]
+Loading weights:  32%|███▏      | 184/579 [00:07<00:09, 40.63it/s]
+Loading weights:  33%|███▎      | 189/579 [00:07<00:10, 37.61it/s]
+Loading weights:  34%|███▍      | 196/579 [00:07<00:09, 41.05it/s]
+Loading weights:  35%|███▍      | 201/579 [00:07<00:10, 37.75it/s]
+Loading weights:  36%|███▌      | 208/579 [00:07<00:09, 40.99it/s]
+Loading weights:  37%|███▋      | 213/579 [00:07<00:09, 37.48it/s]
+Loading weights:  38%|███▊      | 220/579 [00:08<00:09, 37.99it/s]
+Loading weights:  39%|███▊      | 224/579 [00:08<00:10, 34.17it/s]
+Loading weights:  40%|████      | 232/579 [00:08<00:09, 36.35it/s]
+Loading weights:  41%|████      | 236/579 [00:08<00:11, 30.87it/s]
+Loading weights:  42%|████▏     | 244/579 [00:08<00:09, 34.33it/s]
+Loading weights:  43%|████▎     | 248/579 [00:08<00:11, 29.76it/s]
+Loading weights:  44%|████▍     | 256/579 [00:09<00:09, 33.52it/s]
+Loading weights:  45%|████▍     | 260/579 [00:09<00:10, 29.36it/s]
+Loading weights:  46%|████▌     | 264/579 [00:09<00:10, 31.16it/s]
+Loading weights:  46%|████▋     | 268/579 [00:09<00:09, 32.51it/s]
+Loading weights:  47%|████▋     | 272/579 [00:09<00:10, 27.94it/s]
+Loading weights:  48%|████▊     | 280/579 [00:09<00:09, 32.58it/s]
+Loading weights:  49%|████▉     | 284/579 [00:10<00:11, 26.33it/s]
+Loading weights:  50%|████▉     | 288/579 [00:10<00:10, 28.02it/s]
+Loading weights:  50%|█████     | 292/579 [00:10<00:10, 26.64it/s]
+Loading weights:  51%|█████     | 295/579 [00:10<00:14, 19.56it/s]
+Loading weights:  52%|█████▏    | 300/579 [00:10<00:11, 23.99it/s]
+Loading weights:  53%|█████▎    | 304/579 [00:11<00:11, 23.80it/s]
+Loading weights:  53%|█████▎    | 307/579 [00:11<00:14, 18.52it/s]
+Loading weights:  54%|█████▍    | 312/579 [00:11<00:11, 23.71it/s]
+Loading weights:  55%|█████▍    | 316/579 [00:11<00:10, 24.16it/s]
+Loading weights:  55%|█████▌    | 319/579 [00:11<00:14, 18.49it/s]
+Loading weights:  56%|█████▌    | 324/579 [00:12<00:10, 23.37it/s]
+Loading weights:  57%|█████▋    | 328/579 [00:12<00:10, 23.14it/s]
+Loading weights:  57%|█████▋    | 331/579 [00:12<00:13, 17.76it/s]
+Loading weights:  58%|█████▊    | 336/579 [00:12<00:10, 23.05it/s]
+Loading weights:  59%|█████▊    | 340/579 [00:12<00:10, 23.48it/s]
+Loading weights:  59%|█████▉    | 343/579 [00:13<00:13, 18.13it/s]
+Loading weights:  60%|██████    | 348/579 [00:13<00:09, 23.11it/s]
+Loading weights:  61%|██████    | 352/579 [00:13<00:09, 23.11it/s]
+Loading weights:  61%|██████▏   | 355/579 [00:13<00:12, 18.01it/s]
+Loading weights:  62%|██████▏   | 360/579 [00:13<00:09, 23.39it/s]
+Loading weights:  63%|██████▎   | 364/579 [00:13<00:09, 23.75it/s]
+Loading weights:  63%|██████▎   | 367/579 [00:14<00:11, 18.43it/s]
+Loading weights:  64%|██████▍   | 372/579 [00:14<00:08, 23.84it/s]
+Loading weights:  65%|██████▍   | 376/579 [00:14<00:08, 24.30it/s]
+Loading weights:  65%|██████▌   | 379/579 [00:14<00:10, 18.54it/s]
+Loading weights:  66%|██████▋   | 384/579 [00:14<00:08, 23.50it/s]
+Loading weights:  67%|██████▋   | 388/579 [00:14<00:07, 24.01it/s]
+Loading weights:  68%|██████▊   | 391/579 [00:15<00:10, 18.24it/s]
+Loading weights:  68%|██████▊   | 396/579 [00:15<00:07, 23.09it/s]
+Loading weights:  69%|██████▉   | 400/579 [00:15<00:07, 23.36it/s]
+Loading weights:  70%|██████▉   | 403/579 [00:15<00:09, 17.88it/s]
+Loading weights:  70%|███████   | 408/579 [00:15<00:07, 23.18it/s]
+Loading weights:  71%|███████   | 412/579 [00:16<00:07, 23.81it/s]
+Loading weights:  72%|███████▏  | 415/579 [00:16<00:08, 18.35it/s]
+Loading weights:  73%|███████▎  | 420/579 [00:16<00:06, 23.61it/s]
+Loading weights:  73%|███████▎  | 424/579 [00:16<00:06, 24.02it/s]
+Loading weights:  74%|███████▎  | 427/579 [00:16<00:08, 18.01it/s]
+Loading weights:  75%|███████▍  | 432/579 [00:17<00:06, 23.40it/s]
+Loading weights:  75%|███████▌  | 436/579 [00:17<00:06, 23.65it/s]
+Loading weights:  76%|███████▌  | 439/579 [00:17<00:07, 18.17it/s]
+Loading weights:  77%|███████▋  | 444/579 [00:17<00:05, 23.13it/s]
+Loading weights:  77%|███████▋  | 448/579 [00:17<00:05, 23.31it/s]
+Loading weights:  78%|███████▊  | 451/579 [00:18<00:07, 17.98it/s]
+Loading weights:  79%|███████▉  | 456/579 [00:18<00:05, 23.20it/s]
+Loading weights:  79%|███████▉  | 460/579 [00:18<00:05, 23.47it/s]
+Loading weights:  80%|███████▉  | 463/579 [00:18<00:06, 18.03it/s]
+Loading weights:  81%|████████  | 468/579 [00:18<00:04, 22.87it/s]
+Loading weights:  82%|████████▏ | 472/579 [00:18<00:04, 22.90it/s]
+Loading weights:  82%|████████▏ | 475/579 [00:19<00:05, 17.90it/s]
+Loading weights:  83%|████████▎ | 480/579 [00:19<00:04, 23.32it/s]
+Loading weights:  84%|████████▎ | 484/579 [00:19<00:04, 23.74it/s]
+Loading weights:  84%|████████▍ | 487/579 [00:19<00:05, 18.17it/s]
+Loading weights:  85%|████████▍ | 492/579 [00:19<00:03, 23.28it/s]
+Loading weights:  86%|████████▌ | 496/579 [00:20<00:03, 23.18it/s]
+Loading weights:  86%|████████▌ | 499/579 [00:20<00:04, 17.80it/s]
+Loading weights:  87%|████████▋ | 504/579 [00:20<00:03, 22.90it/s]
+Loading weights:  88%|████████▊ | 508/579 [00:20<00:03, 23.24it/s]
+Loading weights:  88%|████████▊ | 511/579 [00:20<00:03, 17.88it/s]
+Loading weights:  89%|████████▉ | 516/579 [00:21<00:02, 22.59it/s]
+Loading weights:  90%|████████▉ | 520/579 [00:21<00:02, 22.73it/s]
+Loading weights:  90%|█████████ | 523/579 [00:21<00:03, 17.61it/s]
+Loading weights:  91%|█████████ | 528/579 [00:21<00:02, 22.59it/s]
+Loading weights:  92%|█████████▏| 532/579 [00:21<00:01, 23.98it/s]
+Loading weights:  92%|█████████▏| 535/579 [00:21<00:02, 19.57it/s]
+Loading weights:  94%|█████████▍| 544/579 [00:22<00:01, 25.88it/s]
+Loading weights:  94%|█████████▍| 547/579 [00:22<00:01, 21.15it/s]
+Loading weights:  96%|█████████▌| 556/579 [00:22<00:00, 26.97it/s]
+Loading weights:  97%|█████████▋| 559/579 [00:22<00:00, 22.35it/s]
+Loading weights:  98%|█████████▊| 565/579 [00:23<00:00, 28.31it/s]
+Loading weights:  98%|█████████▊| 569/579 [00:23<00:00, 24.41it/s]
+Loading weights:  99%|█████████▉| 572/579 [00:23<00:00, 24.42it/s]
+Loading weights: 100%|██████████| 579/579 [00:23<00:00, 24.65it/s]
+[2026-10-12 17:34:16] [INFO    ] httpx: HTTP Request: HEAD https://huggingface.co/Qwen/Qwen2.5-14B-Instruct/resolve/cf98f3b3bbb457ad9e2bb7baf9a0125b6b88caa8/generation_config.json "HTTP/1.1 307 Temporary Redirect"
+[2026-10-12 17:34:16] [INFO    ] httpx: HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/Qwen/Qwen2.5-14B-Instruct/cf98f3b3bbb457ad9e2bb7baf9a0125b6b88caa8/generation_config.json?%2FQwen%2FQwen2.5-14B-Instruct%2Fresolve%2Fcf98f3b3bbb457ad9e2bb7baf9a0125b6b88caa8%2Fgeneration_config.json=&etag=%22bf077f03dc569cfb8a90b3ec1ad20365a620bad6%22 "HTTP/1.1 200 OK"
+[2026-10-12 17:34:17] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/resolve-cache/models/Qwen/Qwen2.5-14B-Instruct/cf98f3b3bbb457ad9e2bb7baf9a0125b6b88caa8/generation_config.json?%2FQwen%2FQwen2.5-14B-Instruct%2Fresolve%2Fcf98f3b3bbb457ad9e2bb7baf9a0125b6b88caa8%2Fgeneration_config.json=&etag=%22bf077f03dc569cfb8a90b3ec1ad20365a620bad6%22 "HTTP/1.1 200 OK"
+[2026-10-12 17:34:17] [INFO    ] httpx: HTTP Request: HEAD https://huggingface.co/Qwen/Qwen2.5-14B-Instruct/resolve/main/custom_generate/generate.py "HTTP/1.1 404 Not Found"
+[2026-10-12 17:34:17] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
+[2026-10-12 17:34:18] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct/tree/main?recursive=true&expand=false "HTTP/1.1 200 OK"
+[2026-10-12 17:34:18] [INFO    ] httpx: HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-14B-Instruct "HTTP/1.1 200 OK"
+[2026-10-12 17:34:18] [INFO    ] gpt_task.inference.inference: Loading pipeline completes
+[2026-10-12 17:34:18] [INFO    ] gpt_task.inference.inference: Start text generation
+[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer Qwen2Tokenizer. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
+[2026-10-12 17:34:20] [INFO    ] gpt_task.inference.inference: task response: {'model': 'Qwen/Qwen2.5-14B-Instruct', 'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': 'Hello, how can I assist you today?'}, 'index': 0}], 'usage': {'prompt_tokens': 35, 'completion_tokens': 10, 'total_tokens': 45}}
+[2026-10-12 17:34:20] [INFO    ] gpt_task.inference.inference: Text generation completes
+{'model': 'Qwen/Qwen2.5-14B-Instruct', 'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': 'Hello, how can I assist you today?'}, 'index': 0}], 'usage': {'prompt_tokens': 35, 'completion_tokens': 10, 'total_tokens': 45}}
+execution_dtype= bfloat16
+execution_quantization= {'quant_method': 'bitsandbytes', 'quant_kwargs': {'_load_in_4bit': True, '_load_in_8bit': False, 'bnb_4bit_compute_dtype': 'bfloat16', 'bnb_4bit_quant_storage': 'uint8', 'bnb_4bit_quant_type': 'nf4', 'bnb_4bit_use_double_quant': False, 'llm_int8_enable_fp32_cpu_offload': False, 'llm_int8_has_fp16_weight': False, 'llm_int8_skip_modules': None, 'llm_int8_threshold': 6.0, 'load_in_4bit': True, 'load_in_8bit': False, 'quant_method': 'bitsandbytes'}, 'source': 'runtime'}

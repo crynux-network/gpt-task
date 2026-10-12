@@ -545,6 +545,12 @@ class RankLoaderTests(unittest.TestCase):
         fake_transformers = ModuleType("transformers")
         fake_transformers.AutoProcessor = Mock(from_pretrained=load_processor)
         fake_transformers.AutoTokenizer = Mock(from_pretrained=load_tokenizer)
+        fake_transformers.AutoConfig = Mock(
+            from_pretrained=Mock(return_value=SimpleNamespace())
+        )
+        fake_transformers.DistributedConfig = Mock(
+            side_effect=lambda **kwargs: SimpleNamespace(**kwargs)
+        )
         fake_transformers.AutoModelForCausalLM = Mock(
             from_pretrained=load_causal
         )
@@ -556,6 +562,10 @@ class RankLoaderTests(unittest.TestCase):
             patch(
                 "gpt_task.inference.tp.rank_worker.configure_artifacts",
             ) as configure,
+            patch(
+                "gpt_task.inference.model_adapters.quantization.resolve_task_quantization",
+                return_value=None,
+            ),
         ):
             loaded = _load_rank_artifacts(
                 TPRuntimeStrategy(
@@ -568,9 +578,10 @@ class RankLoaderTests(unittest.TestCase):
                 ),
                 Config(local_files_only=True),
                 torch.float16,
+                2,
             )
 
-        self.assertEqual(loaded, (model, tokenizer, processor))
+        self.assertEqual(loaded[:3], (model, tokenizer, processor))
         load_processor.assert_called_once()
         load_tokenizer.assert_not_called()
         load_causal.assert_called_once()

@@ -18,6 +18,12 @@ from .execution_dtype import (
     resolve_model_execution_dtype,
     set_execution_dtype,
 )
+from .execution_quantization import (
+    clear_execution_quantization,
+    resolve_loaded_quantization_identity,
+    set_execution_quantization,
+)
+from .model_adapters.quantization import resolve_task_quantization
 from .generation_constraints import (
     build_generation_logits_processors,
     constrain_generation_config,
@@ -375,7 +381,7 @@ def run_task(
     stream_callback: Callable[[models.GPTTaskStreamResponse], None] | None = None,
     seed: int = 0,
     dtype: Literal["float16", "bfloat16", "float32", "auto"] = "auto",
-    quantize_bits: Literal[4, 8] | None = None,
+    quantization_config: models.QuantizationConfig | Mapping[str, Any] | None = None,
     config: Config | None = None,
     model_cache: ModelCache | None = None,
 ) -> Union[models.GPTTaskResponse, models.GPTTaskStreamResponse]:
@@ -384,6 +390,7 @@ def run_task(
 
     clear_executed_gpu_count()
     clear_execution_dtype()
+    clear_execution_quantization()
     # Classic execution uses every visible CUDA device via device_map="auto".
     visible_gpus = torch.cuda.device_count()
     set_executed_gpu_count(visible_gpus)
@@ -409,7 +416,7 @@ def run_task(
             stream_callback=stream_callback,
             seed=seed,
             dtype=dtype,
-            quantize_bits=quantize_bits,
+            quantization_config=quantization_config,
             config=config,
             model_cache=model_cache,
         )
@@ -428,11 +435,11 @@ def _run_task(
     stream_callback: Callable[[models.GPTTaskStreamResponse], None] | None = None,
     seed: int = 0,
     dtype: Literal["float16", "bfloat16", "float32", "auto"] = "auto",
-    quantize_bits: Literal[4, 8] | None = None,
+    quantization_config: models.QuantizationConfig | Mapping[str, Any] | None = None,
     config: Config | None = None,
     model_cache: ModelCache | None = None,
 ) -> Union[models.GPTTaskResponse, models.GPTTaskStreamResponse]:
-    from transformers import set_seed
+    from transformers import AutoConfig, set_seed
 
     if config is None:
         config = get_config()
@@ -449,7 +456,7 @@ def _run_task(
                 "template_args": template_args,
                 "seed": seed,
                 "dtype": dtype,
-                "quantize_bits": quantize_bits,
+                "quantization_config": quantization_config,
             }
         )
 
@@ -460,7 +467,28 @@ def _run_task(
 
     set_seed(args.seed)
 
-    model_key = generate_model_key(args)
+    model_kwargs = load_model_kwargs(config=config)
+    quant_resolution = None
+    if args.quantization_config is not None:
+        model_config = AutoConfig.from_pretrained(
+            args.model,
+            trust_remote_code=True,
+            local_files_only=config.local_files_only,
+            **model_kwargs,
+        )
+        quant_resolution = resolve_task_quantization(
+            args,
+            model_config=model_config,
+        )
+    model_key = generate_model_key(
+        args,
+        executor_mode="device_map",
+        effective_quantization=(
+            None
+            if quant_resolution is None
+            else quant_resolution.effective_config
+        ),
+    )
 
     def model_loader():
         from transformers import AutoProcessor, pipeline
@@ -475,28 +503,25 @@ def _run_task(
         elif args.dtype == "bfloat16":
             torch_dtype = torch.bfloat16
 
-        model_kwargs = load_model_kwargs(config=config)
+        local_model_kwargs = dict(model_kwargs)
         local_files_only = config.local_files_only
         _logger.debug(
-            f"model kwargs: {model_kwargs}, local_files_only: {local_files_only}"
+            f"model kwargs: {local_model_kwargs}, local_files_only: {local_files_only}"
         )
 
         processor = AutoProcessor.from_pretrained(
             args.model,
             trust_remote_code=True,
             local_files_only=local_files_only,
-            **model_kwargs,
+            **local_model_kwargs,
         )
 
-        if args.quantize_bits == 4:
-            from transformers import BitsAndBytesConfig
-            model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                load_in_4bit=True
-            )
-        elif args.quantize_bits == 8:
-            from transformers import BitsAndBytesConfig
-            model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                load_in_8bit=True
+        if (
+            quant_resolution is not None
+            and quant_resolution.transformers_config is not None
+        ):
+            local_model_kwargs["quantization_config"] = (
+                quant_resolution.transformers_config
             )
 
         # CPU/disk offload is prohibited: CPU kernels differ numerically from
@@ -522,7 +547,7 @@ def _run_task(
                 local_files_only=local_files_only,
                 model_kwargs=dict(
                     max_memory=max_memory,
-                    **model_kwargs,
+                    **local_model_kwargs,
                 ),
             )
         except ValueError as e:
@@ -560,6 +585,21 @@ def _run_task(
         pipe = model_loader()
 
     set_execution_dtype(resolve_model_execution_dtype(pipe.model))
+    set_execution_quantization(
+        resolve_loaded_quantization_identity(
+            pipe.model,
+            requested=(
+                None
+                if quant_resolution is None
+                else quant_resolution.effective_config
+            ),
+            reports_as_quantized=(
+                False
+                if quant_resolution is None
+                else quant_resolution.reports_as_quantized
+            ),
+        )
+    )
     tokenizer = _resolve_pipeline_tokenizer(pipe)
     assert tokenizer is not None
 

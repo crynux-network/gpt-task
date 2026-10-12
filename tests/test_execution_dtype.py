@@ -90,7 +90,10 @@ class TensorParallelExecutionDtypeTests(unittest.TestCase):
     def test_rank_result_reports_loaded_model_dtype_on_cache_hit(self):
         args = _args()
         strategy = TPRuntimeStrategy(TP_MODEL_LOADER_CAUSAL_LM, False)
-        model_key = f"{strategy!r}:{generate_model_key(args)}"
+        model_key = (
+            f"{strategy!r}:"
+            f"{generate_model_key(args, executor_mode='tensor_parallel')}"
+        )
         tokenizer = MagicMock(eos_token_id=3)
         tokenizer.decode.return_value = "answer"
         model = MagicMock()
@@ -98,7 +101,7 @@ class TensorParallelExecutionDtypeTests(unittest.TestCase):
         model.config = SimpleNamespace()
         model.generation_config = MagicMock()
         model.generate.return_value = torch.tensor([[1, 2, 3]])
-        model_cache = {model_key: (model, tokenizer, None)}
+        model_cache = {model_key: (model, tokenizer, None, None)}
         generation_config = SimpleNamespace(pad_token_id=None)
 
         with (
@@ -118,6 +121,7 @@ class TensorParallelExecutionDtypeTests(unittest.TestCase):
         ):
             first = _execute_task(
                 0,
+                2,
                 1,
                 strategy,
                 args,
@@ -129,6 +133,7 @@ class TensorParallelExecutionDtypeTests(unittest.TestCase):
             model.dtype = torch.float16
             second = _execute_task(
                 0,
+                2,
                 2,
                 strategy,
                 args,

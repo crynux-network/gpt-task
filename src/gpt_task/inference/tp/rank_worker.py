@@ -9,6 +9,7 @@ from gpt_task import models
 from gpt_task.config import Config
 
 from ..execution_dtype import resolve_model_execution_dtype
+from ..execution_quantization import resolve_loaded_quantization_identity
 from ..generation_constraints import (
     build_generation_logits_processors,
     constrain_generation_config,
@@ -54,18 +55,22 @@ def _load_rank_artifacts(
     args: models.GPTTaskArgs,
     config: Config,
     torch_dtype: Any,
+    world_size: int,
 ):
     from transformers import (
+        AutoConfig,
         AutoModelForCausalLM,
         AutoModelForImageTextToText,
         AutoProcessor,
         AutoTokenizer,
+        DistributedConfig,
     )
 
     from .runtime_strategy import (
         TP_MODEL_LOADER_CAUSAL_LM,
         TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT,
     )
+    from ..model_adapters.quantization import resolve_task_quantization
     from ..utils import load_model_kwargs
 
     model_kwargs = load_model_kwargs(config=config)
@@ -89,10 +94,24 @@ def _load_rank_artifacts(
     else:
         raise RuntimeError(f"Unsupported TP model loader: {strategy.model_loader}")
 
+    model_config = AutoConfig.from_pretrained(args.model, **load_kwargs)
+    quant_resolution = resolve_task_quantization(
+        args,
+        model_config=model_config,
+    )
+    if (
+        quant_resolution is not None
+        and quant_resolution.transformers_config is not None
+    ):
+        load_kwargs["quantization_config"] = quant_resolution.transformers_config
+
     model = model_class.from_pretrained(
         args.model,
-        tp_plan="auto",
         dtype=torch_dtype,
+        distributed_config=DistributedConfig(
+            tp_size=world_size,
+            tp_plan="auto",
+        ),
         **load_kwargs,
     )
     configure_artifacts(
@@ -103,7 +122,7 @@ def _load_rank_artifacts(
             tokenizer=tokenizer,
         )
     )
-    return model, tokenizer, processor
+    return model, tokenizer, processor, quant_resolution
 
 
 def rank_worker_main(
@@ -144,7 +163,7 @@ def rank_worker_main(
     )
 
     # One cached model per rank process; replaced when the model key changes.
-    model_cache: Dict[str, Tuple[Any, Any, Any]] = {}
+    model_cache: Dict[str, Tuple[Any, Any, Any, Any]] = {}
 
     try:
         while True:
@@ -156,6 +175,7 @@ def rank_worker_main(
                 with error_context(local_files_only=config.local_files_only):
                     resp = _execute_task(
                         rank,
+                        world_size,
                         seq,
                         strategy,
                         args,
@@ -176,13 +196,14 @@ def rank_worker_main(
 
 def _execute_task(
     rank: int,
+    world_size: int,
     seq: int,
     strategy: TPRuntimeStrategy,
     args: models.GPTTaskArgs,
     config: Config,
     stream: bool,
     result_queue: Any,
-    model_cache: Dict[str, Tuple[Any, Any, Any]],
+    model_cache: Dict[str, Tuple[Any, Any, Any, Any]],
 ):
     import torch
     from transformers import set_seed
@@ -198,7 +219,7 @@ def _execute_task(
     use_deterministic_mode()
     set_seed(args.seed)
 
-    model_key = f"{strategy!r}:{generate_model_key(args)}"
+    model_key = f"{strategy!r}:{generate_model_key(args, executor_mode='tensor_parallel')}"
     if model_key not in model_cache:
         model_cache.clear()
         torch.cuda.empty_cache()
@@ -211,19 +232,33 @@ def _execute_task(
         elif args.dtype == "bfloat16":
             torch_dtype = torch.bfloat16
 
-        model, tokenizer, processor = _load_rank_artifacts(
+        model, tokenizer, processor, quant_resolution = _load_rank_artifacts(
             strategy,
             args,
             config,
             torch_dtype,
+            world_size,
         )
         model.eval()
         if rank == 0:
             _logger.info("Effective TP plan: %s", getattr(model, "tp_plan", None))
-        model_cache[model_key] = (model, tokenizer, processor)
+        model_cache[model_key] = (model, tokenizer, processor, quant_resolution)
 
-    model, tokenizer, processor = model_cache[model_key]
+    model, tokenizer, processor, quant_resolution = model_cache[model_key]
     execution_dtype = resolve_model_execution_dtype(model)
+    execution_quantization = resolve_loaded_quantization_identity(
+        model,
+        requested=(
+            None
+            if quant_resolution is None
+            else quant_resolution.effective_config
+        ),
+        reports_as_quantized=(
+            False
+            if quant_resolution is None
+            else quant_resolution.reports_as_quantized
+        ),
+    )
 
     resolved_generation_config = resolve_generation_config(
         model.generation_config, args
@@ -280,7 +315,11 @@ def _execute_task(
     if stream:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        return TPTaskResult(response=None, execution_dtype=execution_dtype)
+        return TPTaskResult(
+            response=None,
+            execution_dtype=execution_dtype,
+            execution_quantization=execution_quantization,
+        )
 
     prompt_tokens = len(input_tokens)
     sequences: List[List[int]] = [
@@ -326,4 +365,8 @@ def _execute_task(
 
     _logger.info(f"task response: {resp}")
     _logger.info("TP text generation completes")
-    return TPTaskResult(response=resp, execution_dtype=execution_dtype)
+    return TPTaskResult(
+        response=resp,
+        execution_dtype=execution_dtype,
+        execution_quantization=execution_quantization,
+    )

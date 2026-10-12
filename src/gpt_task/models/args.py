@@ -129,6 +129,13 @@ class GPTTaskStreamResponse(TypedDict):
     choices: List[StreamChoice]
     usage: Usage
 
+class QuantizationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quant_method: NonEmptyString
+    quant_kwargs: Dict[str, Any]
+
+
 class GPTTaskArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -142,7 +149,7 @@ class GPTTaskArgs(BaseModel):
 
     seed: int = 0
     dtype: Literal["float16", "bfloat16", "float32", "auto"] = "auto"
-    quantize_bits: Optional[Literal[4, 8]] = None
+    quantization_config: Optional[QuantizationConfig] = None
 
     @field_validator("messages")
     @classmethod

@@ -14,6 +14,7 @@ from .args import (
     MessageContentBlock,
     NamedToolChoice,
     NamedToolChoiceFunction,
+    QuantizationConfig,
     ResponseFormat,
     ResponseChoice,
     TextContentBlock,
@@ -24,6 +25,7 @@ from .args import (
 __all__ = [
     "GPTGenerationConfig",
     "GPTTaskArgs",
+    "QuantizationConfig",
     "FunctionDefinition",
     "FunctionTool",
     "ToolChoice",

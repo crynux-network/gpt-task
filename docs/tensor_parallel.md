@@ -21,7 +21,7 @@ Remote AutoClass resolution does not prove TP compatibility. The resolved class 
 TP requires:
 
 1. At least two visible GPUs.
-2. `quantize_bits=None`.
+2. A valid effective quantization configuration when quantization is present.
 3. A selected generation AutoClass strategy.
 4. A text config with a non-empty `base_model_tp_plan`.
 5. A complete effective TP plan that passes all applicable validators for the candidate world size.
@@ -53,6 +53,9 @@ The effective plan MUST include:
 - the resolved model class `_tp_plan`;
 - the text config `base_model_tp_plan`;
 - every applicable nested sub-config `base_model_tp_plan`, including vision plans.
+- every plan update returned by the selected quantizer, including scale,
+  zero-point, grouped-expert, or other quantized state that must be sharded
+  with its weight.
 
 The validator MUST infer required dimensions from non-replicated effective-plan entries. Recognized attention, linear-attention, MLP, expert, embedding, and output-head entries MUST map to their corresponding dimensions. Every inferred dimension MUST divide the candidate world size:
 
@@ -77,7 +80,14 @@ Static validation establishes compatibility only for known sharded dimensions. A
 
 The selected runtime strategy MUST carry a model loader and a processor requirement independently. `AutoModelForImageTextToText` always requires `AutoProcessor`. `AutoModelForCausalLM` MUST require `AutoProcessor` for image input when a remote causal `auto_map` exists, and MUST otherwise use `AutoTokenizer`. Trusted remote mappings MUST be invoked through their declaring AutoClass.
 
-Every rank MUST load with `tp_plan="auto"`, use its explicit CUDA rank device, set the same seed, and use the same generation configuration. Rank 0 MUST log `model.tp_plan`, create the streamer when streaming, and emit the response. Nonzero ranks MUST NOT create a streamer or emit a response.
+Every rank MUST load with the selected Transformers distributed TP
+configuration, MUST NOT pass `device_map`, use its explicit CUDA rank device,
+set the same seed, and use the same generation configuration. Quantized TP
+loading MUST preserve the canonical quantization configuration on every rank
+and MUST verify local weight, scale, zero-point, packing, and kernel
+compatibility before generation. Rank 0 MUST log `model.tp_plan`, create the
+streamer when streaming, and emit the response. Nonzero ranks MUST NOT create
+a streamer or emit a response.
 
 After loading, every rank MUST construct the shared model adapter context and resolve the same backend-neutral artifact registry used by classic execution. Adapter matching MUST use loaded configuration identity inside the adapter module. The adapter MUST perform any required upstream model-processor registration before generation. The common rank loader MUST NOT discover or invoke a model-specific registration method directly.
 
@@ -106,6 +116,13 @@ Non-streaming rank 0 output MUST match the canonical gpt-task response shape. Di
 Ranks MUST set deterministic PyTorch behavior and pin NCCL to `Ring`, `Simple`, with NVLS disabled before importing torch. CPU and disk offload MUST NOT occur.
 
 Classic and TP output MUST remain in separate validation pools. Every node in one TP pool MUST use the same GPU model, world size, platform, executor marker, and fallback behavior.
+
+Quantized TP pools MUST additionally use the same effective quantization
+configuration, quantized weight format, selected kernel, and dependency
+contract. Quantization presence MUST NOT prevent a statically eligible task
+from attempting TP. A runtime incompatibility discovered during quantized TP
+loading or generation MUST propagate through the existing execution-error
+contract.
 
 ## Verified Coverage
 

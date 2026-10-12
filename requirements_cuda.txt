@@ -3,16 +3,21 @@ torch==2.12.0+cu130
 
 numpy==1.26.4
 scipy==1.14.1
-transformers==5.14.1
+transformers==5.19.0
 transformers_stream_generator==0.0.5
 sentencepiece==0.2.0
-accelerate==1.2.0
-bitsandbytes==0.49.2
+accelerate==1.15.0
+bitsandbytes==0.50.2
 tiktoken==0.8.0
 einops==0.8.0
 pydantic==2.7.4
 pydantic-settings==2.6.1
 xgrammar==0.2.6
-huggingface_hub==1.24.0
+huggingface_hub==1.33.0
 python-dotenv==1.0.1
-triton-windows>=3.7,<3.8; sys_platform == "win32"
+kernels==0.17.0
+triton-windows==3.7.1.post27; sys_platform == "win32"
+triton==3.6.0; sys_platform == "linux"
+gptqmodel==5.6.12; sys_platform == "linux"
+optimum==1.26.1; sys_platform == "linux"
+ninja==1.13.2; sys_platform == "linux"

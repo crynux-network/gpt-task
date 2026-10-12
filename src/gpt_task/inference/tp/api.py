@@ -12,8 +12,10 @@ from gpt_task.config import Config, get_config
 from ..errors import error_context
 from ..executed_gpu_count import clear_executed_gpu_count, set_executed_gpu_count
 from ..execution_dtype import clear_execution_dtype, set_execution_dtype
+from ..execution_quantization import clear_execution_quantization, set_execution_quantization
 from ..inference import run_task
 from ..model_adapters.input import contains_image_blocks
+from ..model_adapters.quantization import resolve_task_quantization
 from ..model_adapters.tp_plan import validate_effective_tp_plan
 from ..utils import load_model_kwargs
 from .executor import shutdown_tp_executor, submit_tp_task
@@ -132,7 +134,10 @@ def _iter_config_tp_plans(model_config):
 
 
 def _effective_tp_plan(
-    model_config, strategy: TPRuntimeStrategy
+    model_config,
+    strategy: TPRuntimeStrategy,
+    *,
+    quantizer_config: Any | None = None,
 ) -> Dict[str, str]:
     plan: Dict[str, str] = {}
     model_class = _mapped_model_class(model_config, strategy.model_loader)
@@ -153,13 +158,50 @@ def _effective_tp_plan(
         seen_configs.add(plan_id)
         for name, style in config_plan.items():
             plan[f"{prefix}.{name}"] = style
+
+    plan.update(_quantizer_tp_plan_updates(quantizer_config, base_plan=plan))
     return plan
 
 
+def _quantizer_tp_plan_updates(
+    quantizer_config: Any | None,
+    *,
+    base_plan: Dict[str, str] | None = None,
+) -> Dict[str, str]:
+    if quantizer_config is None:
+        return {}
+    seed = dict(base_plan or {})
+    update_tp_plan = getattr(quantizer_config, "update_tp_plan", None)
+    if callable(update_tp_plan):
+        updated = update_tp_plan(dict(seed))
+        if isinstance(updated, dict):
+            return {str(k): str(v) for k, v in updated.items()}
+    try:
+        from transformers.quantizers import AutoHfQuantizer
+
+        quantizer = AutoHfQuantizer.from_config(quantizer_config)
+        update_tp_plan = getattr(quantizer, "update_tp_plan", None)
+        if callable(update_tp_plan):
+            updated = update_tp_plan(dict(seed))
+            if isinstance(updated, dict):
+                return {str(k): str(v) for k, v in updated.items()}
+    except Exception:
+        return {}
+    return {}
+
+
 def _dims_divisible_by(
-    model_config, strategy: TPRuntimeStrategy, world_size: int
+    model_config,
+    strategy: TPRuntimeStrategy,
+    world_size: int,
+    *,
+    quantizer_config: Any | None = None,
 ) -> bool:
-    effective_plan = _effective_tp_plan(model_config, strategy)
+    effective_plan = _effective_tp_plan(
+        model_config,
+        strategy,
+        quantizer_config=quantizer_config,
+    )
     return validate_effective_tp_plan(
         model_config,
         effective_plan,
@@ -176,10 +218,17 @@ def _resolve_tp_task(
     # makes the identical choice and results stay consistent across the pool.
     if visible_gpus < 2:
         return None
-    if args.quantize_bits is not None:
-        return None
 
     model_config = _load_model_config(args, config)
+    quant_resolution = resolve_task_quantization(
+        args,
+        model_config=model_config,
+    )
+    quantizer_config = (
+        None
+        if quant_resolution is None
+        else quant_resolution.transformers_config
+    )
     if not _has_tp_plan(model_config):
         return None
     strategy = _resolve_runtime_strategy(
@@ -187,14 +236,24 @@ def _resolve_tp_task(
         has_image_input=contains_image_blocks(args.messages),
     )
 
-    if _dims_divisible_by(model_config, strategy, visible_gpus):
+    if _dims_divisible_by(
+        model_config,
+        strategy,
+        visible_gpus,
+        quantizer_config=quantizer_config,
+    ):
         return _TPTaskResolution(visible_gpus, strategy)
 
     if _resolve_tp_fallback() != TP_FALLBACK_REDUCE_GPUS:
         return None
 
     for k in range(visible_gpus - 1, 1, -1):
-        if _dims_divisible_by(model_config, strategy, k):
+        if _dims_divisible_by(
+            model_config,
+            strategy,
+            k,
+            quantizer_config=quantizer_config,
+        ):
             return _TPTaskResolution(k, strategy)
     return None
 
@@ -219,7 +278,7 @@ def run_task_tp(
     stream_callback: Callable[[models.GPTTaskStreamResponse], None] | None = None,
     seed: int = 0,
     dtype: Literal["float16", "bfloat16", "float32", "auto"] = "auto",
-    quantize_bits: Literal[4, 8] | None = None,
+    quantization_config: models.QuantizationConfig | Mapping[str, Any] | None = None,
     config: Config | None = None,
     model_cache: ModelCache | None = None,
 ) -> Union[models.GPTTaskResponse, models.GPTTaskStreamResponse]:
@@ -235,6 +294,7 @@ def run_task_tp(
 
     clear_executed_gpu_count()
     clear_execution_dtype()
+    clear_execution_quantization()
 
     with error_context(local_files_only=config.local_files_only):
         if args is None:
@@ -249,7 +309,7 @@ def run_task_tp(
                     "template_args": template_args,
                     "seed": seed,
                     "dtype": dtype,
-                    "quantize_bits": quantize_bits,
+                    "quantization_config": quantization_config,
                 }
             )
 
@@ -296,4 +356,5 @@ def run_task_tp(
     if not isinstance(result, TPTaskResult):
         raise RuntimeError("Tensor-parallel executor returned an invalid result.")
     set_execution_dtype(result.execution_dtype)
+    set_execution_quantization(result.execution_quantization)
     return result.response

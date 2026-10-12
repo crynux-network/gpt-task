@@ -4,6 +4,10 @@
 
 gpt-task owns the execution contract from canonical `GPTTaskArgs` to raw assistant text. OpenAI-compatible request conversion, network task transport, and downstream response parsing are outside this boundary.
 
+Quantization TaskArgs, runtime adapters, artifact configurations, platform
+restrictions, cache identity, and verification requirements are specified in
+[quantization.md](quantization.md).
+
 Every supported model MUST pass through the same six processing stages. A model-specific adapter or runtime strategy MAY specialize a stage, but it MUST preserve the stage input and output contracts.
 
 Classic `device_map="auto"` and tensor-parallel execution are backend strategies inside this flow. Neither backend encloses or replaces the six-stage model-compatibility contract.
@@ -59,7 +63,12 @@ Tensor-parallel resolution MUST load the complete model config with `trust_remot
 
 `AutoModelForImageTextToText` MUST take precedence when declared. Otherwise the runtime MUST use `AutoModelForCausalLM`. Image input through a remote causal mapping MUST additionally require a compatible processor.
 
-TP eligibility MUST require at least two visible GPUs, no quantization, a non-empty text TP plan, and successful validation of every dimension sharded by the effective plan. The effective plan MUST merge the resolved class `_tp_plan`, text `base_model_tp_plan`, and applicable nested sub-config plans.
+TP eligibility MUST require at least two visible GPUs, a non-empty text TP
+plan, and successful validation of every dimension sharded by the effective
+plan. Quantization presence MUST NOT make a task ineligible. The effective
+plan MUST merge the resolved class `_tp_plan`, text `base_model_tp_plan`,
+applicable nested sub-config plans, and updates supplied by the selected
+quantizer.
 
 When the full visible world is invalid, `reduce_gpus` MUST select the largest compatible world size of at least two. All other fallback values MUST select classic execution. Remote `auto_map` resolution alone MUST NOT establish TP support.
 

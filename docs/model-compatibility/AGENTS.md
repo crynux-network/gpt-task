@@ -4,6 +4,7 @@
 
 - `architecture.md`: The common six-stage execution contract from canonical `GPTTaskArgs` to raw assistant text.
 - `compatibility-matrix.md`: Model and execution-path coverage across validation, runtime resolution, artifact loading, input rendering, generation, and raw decoding.
+- `quantization.md`: The stable quantization TaskArgs container, current runtime adapter coverage, platform restrictions, model-embedded configurations, cache identity, and verification boundary.
 - `tool-history-arguments.md`: The Transformers object contract and verified model-interface exceptions for assistant tool-call history.
 - `deepseek-v3.2.md`: Verified DeepSeek-V3.2 family-adapter coverage sample.
 - `qwen3.5.md`: Verified Qwen3.5 coverage sample.

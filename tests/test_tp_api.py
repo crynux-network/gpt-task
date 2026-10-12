@@ -93,18 +93,8 @@ class TPModelResolutionTests(unittest.TestCase):
         )
         load.assert_called_once()
 
-    def test_quantized_and_single_gpu_tasks_do_not_load_config(self):
-        quantized = _args()
-        quantized.quantize_bits = 4
-
+    def test_single_gpu_tasks_do_not_load_config(self):
         with patch.object(api, "_load_model_config") as load:
-            self.assertIsNone(
-                api._resolve_tp_task(
-                    quantized,
-                    Config(local_files_only=True),
-                    2,
-                )
-            )
             self.assertIsNone(
                 api._resolve_tp_task(
                     _args(),
@@ -113,6 +103,43 @@ class TPModelResolutionTests(unittest.TestCase):
                 )
             )
         load.assert_not_called()
+
+    def test_quantization_config_does_not_block_tp_resolution(self):
+        from gpt_task.models import QuantizationConfig
+
+        quantized = _args()
+        quantized.quantization_config = QuantizationConfig(
+            quant_method="bitsandbytes",
+            quant_kwargs={"load_in_4bit": True},
+        )
+
+        with (
+            patch.object(
+                api, "_load_model_config", return_value=Qwen3_5MoeConfig()
+            ) as load,
+            patch.object(
+                api,
+                "resolve_task_quantization",
+                return_value=None,
+            ),
+            patch.object(api, "_dims_divisible_by", return_value=True),
+            patch.object(
+                api,
+                "_resolve_runtime_strategy",
+                return_value=api.TPRuntimeStrategy(
+                    api.TP_MODEL_LOADER_CAUSAL_LM,
+                    False,
+                ),
+            ),
+            patch.object(api, "_has_tp_plan", return_value=True),
+        ):
+            resolution = api._resolve_tp_task(
+                quantized,
+                Config(local_files_only=True),
+                2,
+            )
+        self.assertEqual(resolution.world_size, 2)
+        load.assert_called_once()
 
     def test_reduce_gpus_uses_largest_compatible_world_size(self):
         with (

@@ -11,7 +11,7 @@ from gpt_task import models
 from gpt_task.config import Config, get_config
 from gpt_task.cache import ModelCache
 
-from .errors import error_context
+from .errors import TaskExecutionError, error_context
 from .executed_gpu_count import clear_executed_gpu_count, set_executed_gpu_count
 from .execution_dtype import (
     clear_execution_dtype,
@@ -468,6 +468,8 @@ def _run_task(
     set_seed(args.seed)
 
     model_kwargs = load_model_kwargs(config=config)
+    if args.revision is not None:
+        model_kwargs["revision"] = args.revision
     quant_resolution = None
     if args.quantization_config is not None:
         model_config = AutoConfig.from_pretrained(
@@ -585,21 +587,34 @@ def _run_task(
         pipe = model_loader()
 
     set_execution_dtype(resolve_model_execution_dtype(pipe.model))
-    set_execution_quantization(
-        resolve_loaded_quantization_identity(
-            pipe.model,
-            requested=(
-                None
-                if quant_resolution is None
-                else quant_resolution.effective_config
-            ),
-            reports_as_quantized=(
-                False
-                if quant_resolution is None
-                else quant_resolution.reports_as_quantized
-            ),
-        )
+    loaded_quantization = resolve_loaded_quantization_identity(
+        pipe.model,
+        requested=(
+            None
+            if quant_resolution is None
+            else quant_resolution.effective_config
+        ),
+        reports_as_quantized=(
+            False
+            if quant_resolution is None
+            else quant_resolution.reports_as_quantized
+        ),
     )
+    if (
+        args.quantization_config is not None
+        and (
+            loaded_quantization is None
+            or loaded_quantization.get("quant_method") == "float"
+            or loaded_quantization.get("source") == "dequantized"
+        )
+    ):
+        if model_cache is not None:
+            model_cache.delete(model_key)
+        clear_execution_quantization()
+        raise TaskExecutionError(
+            "Requested quantization was not preserved after model load"
+        )
+    set_execution_quantization(loaded_quantization)
     tokenizer = _resolve_pipeline_tokenizer(pipe)
     assert tokenizer is not None
 

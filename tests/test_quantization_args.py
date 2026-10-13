@@ -50,6 +50,42 @@ class QuantizationArgsTests(unittest.TestCase):
                 }
             )
 
+    def test_rejects_dequantize_true(self):
+        with self.assertRaises(ValidationError):
+            _args(
+                quantization_config={
+                    "quant_method": "fp8",
+                    "quant_kwargs": {"dequantize": True},
+                }
+            )
+
+    def test_rejects_dequantize_false(self):
+        with self.assertRaises(ValidationError):
+            _args(
+                quantization_config={
+                    "quant_method": "fp8",
+                    "quant_kwargs": {"dequantize": False},
+                }
+            )
+
+    def test_revision_defaults_to_none(self):
+        args = _args()
+        self.assertIsNone(args.revision)
+
+    def test_accepts_explicit_revision(self):
+        args = _args(revision="abc123def456")
+        self.assertEqual(args.revision, "abc123def456")
+
+    def test_rejects_empty_revision(self):
+        with self.assertRaises(ValidationError):
+            _args(revision="")
+
+    def test_rejects_format_fields(self):
+        with self.assertRaises(ValidationError):
+            _args(format="gguf")
+        with self.assertRaises(ValidationError):
+            _args(format_kwargs={"filename": "model.gguf"})
+
     def test_unsupported_backend(self):
         args = _args(
             quantization_config={

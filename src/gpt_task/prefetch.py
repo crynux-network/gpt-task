@@ -65,15 +65,22 @@ def requests_proxy_session(proxy: ProxyConfig | None):
         yield None
 
 
-def download_model(model_name: str, hf_model_cache_dir: str | None = None, proxy: ProxyConfig | None = None):
+def download_model(
+    model_name: str,
+    hf_model_cache_dir: str | None = None,
+    proxy: ProxyConfig | None = None,
+    revision: str | None = None,
+):
     with requests_proxy_session(proxy=proxy) as proxies:
         call_args = {
             "cache_dir": hf_model_cache_dir,
             "resume_download": True,
             "proxies": proxies,
         }
+        if revision is not None:
+            call_args["revision"] = revision
 
-        info = model_info(model_name)
+        info = model_info(model_name, revision=revision)
         siblings = info.siblings
 
         ignore_patterns = ["**/*"]

@@ -12,13 +12,14 @@ def generate_model_key(
     model_revision: str | None = None,
     effective_quantization: dict[str, Any] | None = None,
 ) -> str:
+    revision = model_revision if model_revision is not None else args.revision
     model_args: Dict[str, Any] = {
         "model": args.model,
         "dtype": args.dtype,
         "executor_mode": executor_mode,
     }
-    if model_revision is not None:
-        model_args["model_revision"] = model_revision
+    if revision is not None:
+        model_args["model_revision"] = revision
     if args.quantization_config is not None:
         model_args["quantization_config"] = (
             args.quantization_config.model_dump(mode="json")

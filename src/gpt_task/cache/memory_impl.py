@@ -23,6 +23,14 @@ class MemoryModelCache(object):
             self._cache[key] = model
             return model
 
+    def delete(self, key: str) -> None:
+        if key not in self._cache:
+            return
+        model = self._cache.pop(key)
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     def clear(self) -> None:
         self._cache.clear()
         if torch.cuda.is_available():

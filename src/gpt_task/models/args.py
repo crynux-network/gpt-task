@@ -135,11 +135,20 @@ class QuantizationConfig(BaseModel):
     quant_method: NonEmptyString
     quant_kwargs: Dict[str, Any]
 
+    @model_validator(mode="after")
+    def _reject_dequantize(self) -> "QuantizationConfig":
+        if "dequantize" in self.quant_kwargs:
+            raise ValueError(
+                "quantization_config.quant_kwargs must not contain dequantize"
+            )
+        return self
+
 
 class GPTTaskArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: NonEmptyString
+    revision: Optional[NonEmptyString] = None
     messages: List[Message]
     tools: Optional[List[FunctionTool]] = None
     tool_choice: Optional[ToolChoice] = None

@@ -48,6 +48,8 @@ def _load_model_config(args: models.GPTTaskArgs, config: Config):
     from transformers import AutoConfig
 
     model_kwargs = load_model_kwargs(config=config)
+    if args.revision is not None:
+        model_kwargs["revision"] = args.revision
     return AutoConfig.from_pretrained(
         args.model,
         trust_remote_code=True,

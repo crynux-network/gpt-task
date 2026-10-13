@@ -45,7 +45,6 @@ class FineGrainedFP8QuantizationAdapter:
             kwargs,
             normalize=normalize,
         )
-        dequantize = bool(getattr(transformers_config, "dequantize", False))
         effective = config_to_effective_dict(transformers_config)
         if "weight_block_size" in effective and isinstance(
             effective["weight_block_size"], tuple
@@ -58,5 +57,5 @@ class FineGrainedFP8QuantizationAdapter:
                 "quant_method": "fp8",
                 "quant_kwargs": effective,
             },
-            reports_as_quantized=not dequantize,
+            reports_as_quantized=True,
         )

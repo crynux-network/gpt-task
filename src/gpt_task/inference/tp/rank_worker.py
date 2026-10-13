@@ -79,6 +79,8 @@ def _load_rank_artifacts(
         "local_files_only": config.local_files_only,
         **model_kwargs,
     }
+    if args.revision is not None:
+        load_kwargs["revision"] = args.revision
 
     processor = None
     if strategy.requires_processor:
@@ -259,6 +261,25 @@ def _execute_task(
             else quant_resolution.reports_as_quantized
         ),
     )
+    if (
+        args.quantization_config is not None
+        and (
+            execution_quantization is None
+            or execution_quantization.get("quant_method") == "float"
+            or execution_quantization.get("source") == "dequantized"
+        )
+    ):
+        model_cache.pop(model_key, None)
+        del model, tokenizer, processor, quant_resolution
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        from ..errors import TaskExecutionError
+
+        raise TaskExecutionError(
+            "Requested quantization was not preserved after model load"
+        )
 
     resolved_generation_config = resolve_generation_config(
         model.generation_config, args

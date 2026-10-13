@@ -34,6 +34,7 @@ class CanonicalStructuredOutputTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             GPTTaskArgs.model_validate(
                 {
+                    "version": "3.7.0",
                     "model": "m",
                     "messages": [],
                     "structured_outputs": {},
@@ -44,6 +45,7 @@ class CanonicalStructuredOutputTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             GPTTaskArgs.model_validate(
                 {
+                    "version": "3.7.0",
                     "model": "m",
                     "messages": [],
                     "tools": [_tool()],
@@ -56,6 +58,7 @@ class CanonicalStructuredOutputTests(unittest.TestCase):
 
     def test_tool_constraint_overrides_response_schema(self):
         args = GPTTaskArgs(
+            version="3.7.0",
             model="m",
             messages=[],
             tools=[_tool()],
@@ -82,12 +85,14 @@ class CanonicalStructuredOutputTests(unittest.TestCase):
             tokenizer=SimpleNamespace(),
         )
         loose = GPTTaskArgs(
+            version="3.7.0",
             model="m",
             messages=[],
             tools=[_tool(False)],
             tool_choice="auto",
         )
         strict = GPTTaskArgs(
+            version="3.7.0",
             model="m",
             messages=[],
             tools=[_tool(True)],
@@ -142,6 +147,7 @@ class GenerationAdapterTests(unittest.TestCase):
 
     def test_each_generation_gets_a_new_logits_processor(self):
         args = GPTTaskArgs(
+            version="3.7.0",
             model="m",
             messages=[],
             response_format={"type": "json_object"},

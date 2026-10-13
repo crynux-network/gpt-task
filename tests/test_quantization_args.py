@@ -14,6 +14,7 @@ from gpt_task.models import GPTTaskArgs, QuantizationConfig
 
 def _args(**kwargs) -> GPTTaskArgs:
     payload = {
+        "version": "3.7.0",
         "model": "org/model",
         "messages": [{"role": "user", "content": "hi"}],
         "dtype": "bfloat16",

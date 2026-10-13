@@ -147,6 +147,7 @@ class QuantizationConfig(BaseModel):
 class GPTTaskArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    version: NonEmptyString
     model: NonEmptyString
     revision: Optional[NonEmptyString] = None
     messages: List[Message]

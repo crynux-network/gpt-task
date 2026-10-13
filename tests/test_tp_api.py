@@ -38,7 +38,11 @@ def _args(*, image: bool = False) -> GPTTaskArgs:
         if image
         else "hello"
     )
-    return GPTTaskArgs(model="test/model", messages=[{"role": "user", "content": content}])
+    return GPTTaskArgs(
+        version="3.7.0",
+        model="test/model",
+        messages=[{"role": "user", "content": content}],
+    )
 
 
 def _image_strategy() -> api.TPRuntimeStrategy:

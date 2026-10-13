@@ -18,6 +18,7 @@ class Entry:
 
 def _args(**kwargs) -> GPTTaskArgs:
     payload = {
+        "version": "3.7.0",
         "model": "org/model",
         "messages": [{"role": "user", "content": "hi"}],
     }

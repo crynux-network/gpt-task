@@ -82,6 +82,7 @@ class VLMInputTests(unittest.TestCase):
     def test_prepares_hf_image_blocks_and_moves_every_tensor(self):
         processor = _Processor()
         args = GPTTaskArgs(
+            version="3.7.0",
             model="test/model",
             messages=[
                 {
@@ -160,6 +161,7 @@ class VLMInputTests(unittest.TestCase):
 
     def test_ernie_missing_required_vision_method_fails(self):
         args = GPTTaskArgs(
+            version="3.7.0",
             model="test/model",
             messages=[
                 {
@@ -181,6 +183,7 @@ class VLMInputTests(unittest.TestCase):
 
     def test_image_input_rejects_strategy_without_processor_contract(self):
         args = GPTTaskArgs(
+            version="3.7.0",
             model="test/model",
             messages=[
                 {
@@ -207,6 +210,7 @@ class VLMInputTests(unittest.TestCase):
 
     def test_text_only_vlm_uses_existing_prompt_adapter(self):
         args = GPTTaskArgs(
+            version="3.7.0",
             model="test/model",
             messages=[{"role": "user", "content": "hello"}],
             tools=[{"type": "function", "function": {"name": "test"}}],
@@ -247,6 +251,7 @@ class VLMInputTests(unittest.TestCase):
 
     def test_image_vlm_uses_shared_multimodal_helper(self):
         args = GPTTaskArgs(
+            version="3.7.0",
             model="test/model",
             messages=[
                 {
@@ -285,6 +290,7 @@ class VLMInputTests(unittest.TestCase):
 
     def test_classic_image_vlm_uses_shared_multimodal_helper(self):
         args = GPTTaskArgs(
+            version="3.7.0",
             model="test/model",
             messages=[
                 {
@@ -371,6 +377,7 @@ class VLMInputTests(unittest.TestCase):
 
         processor = CustomProcessor()
         args = GPTTaskArgs(
+            version="3.7.0",
             model="test/custom-model",
             messages=[
                 {
@@ -452,6 +459,7 @@ class VLMInputTests(unittest.TestCase):
 
         processor = MappingProcessor()
         args = GPTTaskArgs(
+            version="3.7.0",
             model="test/custom-model",
             messages=[
                 {
@@ -573,6 +581,7 @@ class RankLoaderTests(unittest.TestCase):
                     True,
                 ),
                 GPTTaskArgs(
+                    version="3.7.0",
                     model="remote/model",
                     messages=[{"role": "user", "content": "hello"}],
                 ),

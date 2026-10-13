@@ -11,6 +11,7 @@ from gpt_task.models import GPTTaskArgs
 
 def _args() -> GPTTaskArgs:
     return GPTTaskArgs(
+        version="3.7.0",
         model="test/model",
         messages=[{"role": "user", "content": "hello"}],
     )

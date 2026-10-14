@@ -20,7 +20,7 @@ dependencies = [
     "accelerate==1.15.0",
     "tiktoken",
     "einops",
-    "pydantic",
+    "pydantic==2.12.5",
     "pydantic-settings",
     "xgrammar==0.2.6"
 ]

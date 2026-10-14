@@ -10,14 +10,14 @@ accelerate==1.15.0
 bitsandbytes==0.50.2
 tiktoken==0.8.0
 einops==0.8.0
-pydantic==2.7.4
+pydantic==2.12.5
 pydantic-settings==2.6.1
 xgrammar==0.2.6
 huggingface_hub==1.33.0
 python-dotenv==1.0.1
 kernels==0.17.0
 triton-windows==3.7.1.post27; sys_platform == "win32"
-triton==3.6.0; sys_platform == "linux"
+triton==3.7.0; sys_platform == "linux"
 gptqmodel==5.6.12; sys_platform == "linux"
 optimum==1.26.1; sys_platform == "linux"
 ninja==1.13.2; sys_platform == "linux"

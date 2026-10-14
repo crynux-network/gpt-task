@@ -15,7 +15,7 @@ pydantic-settings==2.6.1
 xgrammar==0.2.6
 huggingface_hub==1.33.0
 python-dotenv==1.0.1
-kernels==0.17.0
+kernels==0.17.2
 triton-windows==3.7.1.post27; sys_platform == "win32"
 triton==3.7.0; sys_platform == "linux"
 gptqmodel==5.6.12; sys_platform == "linux"

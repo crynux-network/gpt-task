@@ -86,6 +86,60 @@ class ClassicExecutionDtypeTests(unittest.TestCase):
         self.assertNotIn("execution_dtype", second)
         load_pipeline.assert_called_once()
 
+    def test_passes_revision_as_pipeline_top_level_arg(self):
+        revision = "0123456789abcdef0123456789abcdef01234567"
+        args = _args().model_copy(update={"revision": revision})
+        tokenizer = MagicMock()
+        tokenizer.eos_token_id = 3
+        tokenizer.decode.return_value = "answer"
+        processor = MagicMock(tokenizer=tokenizer)
+        model = MagicMock()
+        model.dtype = torch.float32
+        model.device = torch.device("cpu")
+        model.config = SimpleNamespace(model_type="test")
+        model.generation_config = MagicMock()
+        pipe = MagicMock(
+            model=model,
+            processor=processor,
+            tokenizer=tokenizer,
+            generation_config=MagicMock(),
+        )
+        pipe._preprocess_params = {}
+        pipe._forward_params = {}
+        pipe._postprocess_params = {}
+        pipe.return_value = [{"generated_token_ids": [1, 2, 3]}]
+        generation_config = SimpleNamespace(pad_token_id=None)
+
+        with (
+            patch("transformers.AutoProcessor.from_pretrained", return_value=processor),
+            patch("transformers.pipeline", return_value=pipe) as load_pipeline,
+            patch(
+                "gpt_task.inference.inference.get_max_memory",
+                return_value={"cpu": 1},
+            ),
+            patch("gpt_task.inference.inference.configure_artifacts"),
+            patch(
+                "gpt_task.inference.inference.render_task_input",
+                return_value=RenderedTaskInput("prompt", None),
+            ),
+            patch(
+                "gpt_task.inference.inference._resolve_prompt_input_tokens",
+                return_value=[1, 2],
+            ),
+            patch(
+                "gpt_task.inference.inference.resolve_generation_config",
+                return_value=generation_config,
+            ),
+            patch("gpt_task.inference.inference.use_deterministic_mode"),
+            patch("torch.cuda.device_count", return_value=1),
+        ):
+            run_task(args, config=Config())
+
+        load_pipeline.assert_called_once()
+        _, kwargs = load_pipeline.call_args
+        self.assertEqual(kwargs["revision"], revision)
+        self.assertNotIn("revision", kwargs["model_kwargs"])
+
 
 class TensorParallelExecutionDtypeTests(unittest.TestCase):
     def test_rank_result_reports_loaded_model_dtype_on_cache_hit(self):

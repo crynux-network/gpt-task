@@ -535,10 +535,11 @@ def _run_task(
         max_memory["cpu"] = 0
 
         try:
-            # local_files_only must be a top-level argument: transformers 5.x
-            # merges hub kwargs and model_kwargs when loading the config and
-            # weights, so putting it inside model_kwargs raises a duplicate
-            # keyword argument error.
+            # revision and local_files_only must be top-level arguments:
+            # transformers 5.x merges hub kwargs and model_kwargs when loading
+            # the config and weights, so putting either inside model_kwargs
+            # raises a duplicate keyword argument error.
+            revision = local_model_kwargs.pop("revision", None)
             pipe = pipeline(
                 task=None,
                 model=args.model,
@@ -546,6 +547,7 @@ def _run_task(
                 trust_remote_code=True,
                 device_map="auto",
                 dtype=torch_dtype,
+                revision=revision,
                 local_files_only=local_files_only,
                 model_kwargs=dict(
                     max_memory=max_memory,

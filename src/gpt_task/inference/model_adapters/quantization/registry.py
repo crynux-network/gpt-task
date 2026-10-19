@@ -105,13 +105,11 @@ def _resolution_from_embedded(model_config: Any) -> QuantizationResolution:
         method = type(embedded).__name__
         effective = config_to_effective_dict(embedded)
 
-    # compressed-tensors and similar loaders that restore floating weights
-    # are reported as non-quantized by the post-load identity helpers.
-    reports_as_quantized = method not in {
-        "compressed-tensors",
-        "compressed_tensors",
-        "gguf",
-    }
+    # GGUF loaders that restore floating weights are reported as
+    # non-quantized. Embedded compressed-tensors reports as quantized;
+    # resolve_loaded_quantization_identity records float/dequantized when
+    # the loaded model has already expanded to floating-point weights.
+    reports_as_quantized = method not in {"gguf"}
     return QuantizationResolution(
         quant_method=method,
         transformers_config=None,

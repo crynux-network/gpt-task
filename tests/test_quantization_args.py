@@ -136,6 +136,27 @@ class QuantizationArgsTests(unittest.TestCase):
         with self.assertRaises(Exception):
             resolve_task_quantization(args, model_config=model_config)
 
+    def test_embedded_compressed_tensors_reports_as_quantized(self):
+        args = _args()
+        model_config = type(
+            "Cfg",
+            (),
+            {
+                "quantization_config": {
+                    "quant_method": "compressed-tensors",
+                    "format": "float-quantized",
+                }
+            },
+        )()
+        resolution = resolve_task_quantization(args, model_config=model_config)
+        self.assertIsNotNone(resolution)
+        self.assertEqual(resolution.quant_method, "compressed-tensors")
+        self.assertTrue(resolution.reports_as_quantized)
+        self.assertEqual(
+            resolution.effective_config["source"],
+            "embedded",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

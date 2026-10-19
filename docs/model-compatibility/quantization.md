@@ -156,12 +156,17 @@ dependency contract.
 The current Windows CUDA dependency set supports:
 
 - BitsAndBytes NF4 and FP4 4-bit execution;
-- BitsAndBytes INT8 execution; and
+- BitsAndBytes INT8 execution;
 - fine-grained FP8 execution when the GPU, PyTorch, `kernels`, and
-  `triton-windows` runtime pass the required probe.
+  `triton-windows` runtime pass the required probe; and
+- embedded compressed-tensors checkpoints when Transformers and the
+  installed `compressed-tensors` dependency load them on the available
+  GPU and kernels.
 
 AWQ and GPTQModel MUST return a clear unsupported-runtime error while the
 required GPTQModel runtime is unavailable on the supported Windows build.
+Missing compressed-tensors dependencies or unsupported kernels MUST fail
+through the existing execution-error contract.
 
 ### Linux CUDA
 
@@ -170,8 +175,9 @@ The current Linux CUDA dependency set supports:
 - BitsAndBytes NF4 and FP4 4-bit execution;
 - BitsAndBytes INT8 execution;
 - fine-grained FP8 execution;
-- AWQ INT4 model execution; and
-- GPTQModel INT4 model execution.
+- AWQ INT4 model execution;
+- GPTQModel INT4 model execution; and
+- embedded compressed-tensors checkpoint execution.
 
 Actual execution MUST still satisfy the selected backend's dependency,
 kernel, model configuration, and GPU-architecture requirements.
@@ -226,19 +232,40 @@ semantics, or checkpoint format do not satisfy an available kernel MUST fail
 while loading before generation. The runtime MUST NOT alter the embedded
 configuration to make it loadable.
 
-### Unsupported model execution
+### Embedded compressed-tensors
 
-Compressed-tensors checkpoints that are expanded to floating-point weights
-MUST NOT be reported as quantized execution.
+Compressed-tensors configuration belongs to the model files. TaskArgs MUST
+NOT set `quantization_config` for these checkpoints. TaskArgs MUST NOT treat
+`quant_method: compressed-tensors` as a task-time adapter.
+
+Embedded compressed-tensors is distinct from TaskArgs fine-grained
+`quant_method: fp8`. Fine-grained FP8 uses the TaskArgs adapter and
+Transformers fine-grained FP8 configuration. Hub checkpoints whose embedded
+`quant_method` is `compressed-tensors` (including many FP8 and NVFP4 weight
+formats) MUST use the embedded path.
+
+Current Linux and Docker coverage SHALL include classic single-GPU execution
+of Hub compressed-tensors checkpoints that load through Transformers and the
+installed `compressed-tensors` dependency. After load, the runtime MUST
+record execution identity from the loaded model state. A load that expands
+weights to floating-point MUST be reported as floating-point or dequantized
+execution, not as quantized compressed-tensors execution.
+
+Tensor-parallel compressed-tensors execution and NVFP4 kernel coverage are
+not established by this document. Those combinations MUST be verified by
+measurement. A failure during load or generation MUST propagate through the
+existing execution-error contract.
+
+### Unsupported model execution
 
 LLM GGUF packed execution is outside current CUDA coverage. A Transformers
 path that dequantizes GGUF weights MUST NOT be reported as GGUF quantized
 execution.
 
-TorchAO, Quanto, HQQ, SINQ, AQLM, VPTQ, generic MXFP4, and generic NVFP4 are
-outside current runtime adapter coverage. Their names remain representable by
-the stable TaskArgs container. gpt-task MUST return an unsupported-backend
-error when no adapter exists.
+TorchAO, Quanto, HQQ, SINQ, AQLM, VPTQ, generic MXFP4, and TaskArgs-level
+generic NVFP4 are outside current runtime adapter coverage. Their names
+remain representable by the stable TaskArgs container. gpt-task MUST return
+an unsupported-backend error when no adapter exists.
 
 ## Cache and execution metadata
 
@@ -350,6 +377,22 @@ owns the GPTQ configuration.
 ```json
 {
   "model": "Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4",
+  "messages": [{"role": "user", "content": "Say hello in one sentence."}],
+  "dtype": "auto",
+  "seed": 42,
+  "generation_config": {"max_new_tokens": 64}
+}
+```
+
+### Embedded compressed-tensors FP8
+
+Linux CUDA and Docker. TaskArgs MUST NOT set `quantization_config`; the
+checkpoint owns the compressed-tensors configuration. This is not TaskArgs
+fine-grained `quant_method: fp8`.
+
+```json
+{
+  "model": "RedHatAI/Llama-3.2-1B-Instruct-FP8-dynamic",
   "messages": [{"role": "user", "content": "Say hello in one sentence."}],
   "dtype": "auto",
   "seed": 42,

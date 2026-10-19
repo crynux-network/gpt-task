@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 
@@ -62,7 +63,9 @@ def encode_rendered_task_input(
 def _move_tensors_to_device(value: Any, device: Any) -> Any:
     if torch.is_tensor(value):
         return value.to(device)
-    if isinstance(value, dict):
+    # Processor/tokenizer outputs are often BatchFeature/BatchEncoding
+    # (Mapping, not dict). Iterate Mapping so tensors still move to device.
+    if isinstance(value, Mapping):
         return {
             key: _move_tensors_to_device(item, device)
             for key, item in value.items()

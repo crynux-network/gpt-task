@@ -1,7 +1,7 @@
 --extra-index-url https://download.pytorch.org/whl/cu130
 torch==2.12.0+cu130
 
-numpy==1.26.4
+numpy==2.2.6
 scipy==1.14.1
 transformers==5.19.0
 transformers_stream_generator==0.0.5
@@ -18,6 +18,9 @@ python-dotenv==1.0.1
 kernels==0.17.2
 triton-windows==3.7.1.post27; sys_platform == "win32"
 triton==3.7.0; sys_platform == "linux"
-gptqmodel==5.6.12; sys_platform == "linux"
+# GPTQModel main commit: PyPI <=7.6.0 is incompatible with transformers 5.x.
+# Install with dependencies (pillow, logbar, tokenicer, ...). Do not use
+# --no-deps; those packages are declared by GPTQModel, not duplicated here.
+gptqmodel @ https://github.com/ModelCloud/GPTQModel/archive/70e3e6e1b3bd19244250053fbb17c81aa656abd2.zip ; sys_platform == "linux"
 optimum==1.26.1; sys_platform == "linux"
 ninja==1.13.2; sys_platform == "linux"

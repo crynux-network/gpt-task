@@ -24,6 +24,7 @@ from .execution_quantization import (
     set_execution_quantization,
 )
 from .model_adapters.quantization import resolve_task_quantization
+from .model_adapters.runtime_strategy import resolve_pipeline_task
 from .generation_constraints import (
     build_generation_logits_processors,
     constrain_generation_config,
@@ -470,18 +471,17 @@ def _run_task(
     model_kwargs = load_model_kwargs(config=config)
     if args.revision is not None:
         model_kwargs["revision"] = args.revision
-    quant_resolution = None
-    if args.quantization_config is not None:
-        model_config = AutoConfig.from_pretrained(
-            args.model,
-            trust_remote_code=True,
-            local_files_only=config.local_files_only,
-            **model_kwargs,
-        )
-        quant_resolution = resolve_task_quantization(
-            args,
-            model_config=model_config,
-        )
+    model_config = AutoConfig.from_pretrained(
+        args.model,
+        trust_remote_code=True,
+        local_files_only=config.local_files_only,
+        **model_kwargs,
+    )
+    pipeline_task = resolve_pipeline_task(model_config)
+    quant_resolution = resolve_task_quantization(
+        args,
+        model_config=model_config,
+    )
     model_key = generate_model_key(
         args,
         executor_mode="device_map",
@@ -541,7 +541,7 @@ def _run_task(
             # raises a duplicate keyword argument error.
             revision = local_model_kwargs.pop("revision", None)
             pipe = pipeline(
-                task=None,
+                task=pipeline_task,
                 model=args.model,
                 processor=processor,
                 trust_remote_code=True,

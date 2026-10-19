@@ -53,6 +53,10 @@ class ClassicExecutionDtypeTests(unittest.TestCase):
         model_cache = MemoryModelCache()
 
         with (
+            patch(
+                "transformers.AutoConfig.from_pretrained",
+                return_value=SimpleNamespace(),
+            ),
             patch("transformers.AutoProcessor.from_pretrained", return_value=processor),
             patch("transformers.pipeline", return_value=pipe) as load_pipeline,
             patch(
@@ -111,6 +115,10 @@ class ClassicExecutionDtypeTests(unittest.TestCase):
         generation_config = SimpleNamespace(pad_token_id=None)
 
         with (
+            patch(
+                "transformers.AutoConfig.from_pretrained",
+                return_value=SimpleNamespace(),
+            ),
             patch("transformers.AutoProcessor.from_pretrained", return_value=processor),
             patch("transformers.pipeline", return_value=pipe) as load_pipeline,
             patch(
@@ -138,6 +146,7 @@ class ClassicExecutionDtypeTests(unittest.TestCase):
         load_pipeline.assert_called_once()
         _, kwargs = load_pipeline.call_args
         self.assertEqual(kwargs["revision"], revision)
+        self.assertEqual(kwargs["task"], "text-generation")
         self.assertNotIn("revision", kwargs["model_kwargs"])
 
 

@@ -55,7 +55,7 @@ Runtime-strategy and TP-plan hooks MUST consume loaded configuration and return 
 
 ### Classic Execution
 
-Classic execution MUST use `AutoProcessor.from_pretrained(..., trust_remote_code=True)` and Transformers pipeline auto-dispatch with `device_map="auto"`. It MUST prohibit CPU and disk offload.
+Classic execution MUST load the complete model config with `trust_remote_code=True`, resolve the pipeline task from local AutoClass mappings and trusted repository `auto_map` entries (`AutoModelForImageTextToText` → `image-text-to-text`, otherwise `text-generation`), then use `AutoProcessor.from_pretrained(..., trust_remote_code=True)` and `pipeline(task=<resolved>, ...)` with `device_map="auto"`. It MUST NOT depend on Hub `library_name` or Hub task inference to select the pipeline task. It MUST prohibit CPU and disk offload.
 
 ### Tensor-Parallel Execution
 

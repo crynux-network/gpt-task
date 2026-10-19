@@ -3,6 +3,8 @@
 .models
 
 *venv
+venv-linux
+
 .idea/
 __pycache__/
 *egg-info/

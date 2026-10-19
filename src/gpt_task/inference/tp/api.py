@@ -16,6 +16,11 @@ from ..execution_quantization import clear_execution_quantization, set_execution
 from ..inference import run_task
 from ..model_adapters.input import contains_image_blocks
 from ..model_adapters.quantization import resolve_task_quantization
+from ..model_adapters.runtime_strategy import (
+    has_remote_auto_map,
+    is_builtin_mapped,
+    resolve_runtime_strategy,
+)
 from ..model_adapters.tp_plan import validate_effective_tp_plan
 from ..utils import load_model_kwargs
 from .executor import shutdown_tp_executor, submit_tp_task
@@ -77,19 +82,11 @@ def _mapped_model_class(model_config, model_loader: str):
 
 
 def _is_builtin_mapped(model_config, model_loader: str) -> bool:
-    from transformers import AutoModelForCausalLM, AutoModelForImageTextToText
-
-    mapping = (
-        AutoModelForImageTextToText._model_mapping
-        if model_loader == TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT
-        else AutoModelForCausalLM._model_mapping
-    )
-    return type(model_config) in mapping
+    return is_builtin_mapped(model_config, model_loader)
 
 
 def _has_remote_auto_map(model_config, loader: str) -> bool:
-    auto_map = getattr(model_config, "auto_map", None) or {}
-    return isinstance(auto_map, Mapping) and loader in auto_map
+    return has_remote_auto_map(model_config, loader)
 
 
 def _resolve_runtime_strategy(
@@ -97,19 +94,9 @@ def _resolve_runtime_strategy(
     *,
     has_image_input: bool = False,
 ) -> TPRuntimeStrategy:
-    if _is_builtin_mapped(
-        model_config, TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT
-    ) or _has_remote_auto_map(
-        model_config, TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT
-    ):
-        return TPRuntimeStrategy(TP_MODEL_LOADER_IMAGE_TEXT_TO_TEXT, True)
-
-    remote_causal_lm = _has_remote_auto_map(
-        model_config, TP_MODEL_LOADER_CAUSAL_LM
-    )
-    return TPRuntimeStrategy(
-        TP_MODEL_LOADER_CAUSAL_LM,
-        has_image_input and remote_causal_lm,
+    return resolve_runtime_strategy(
+        model_config,
+        has_image_input=has_image_input,
     )
 
 

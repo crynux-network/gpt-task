@@ -5,8 +5,13 @@ from unittest.mock import Mock, patch
 
 import torch
 
+from transformers.feature_extraction_utils import BatchFeature
+
 from gpt_task.inference.inference import _run_task, prepare_vlm_inputs
-from gpt_task.inference.input_rendering import RenderedTaskInput
+from gpt_task.inference.input_rendering import (
+    RenderedTaskInput,
+    _move_tensors_to_device,
+)
 from gpt_task.inference.model_adapters import ModelAdapterContext
 from gpt_task.inference.model_adapters.artifacts import (
     configure_artifacts,
@@ -125,6 +130,22 @@ class VLMInputTests(unittest.TestCase):
         for key in ("input_ids", "attention_mask", "pixel_values"):
             self.assertEqual(inputs[key].device.type, "cpu")
         self.assertEqual(inputs["metadata"], "unchanged")
+
+    def test_moves_batch_feature_tensors_to_device(self):
+        encoded = BatchFeature(
+            {
+                "input_ids": torch.zeros(1, 2, dtype=torch.long),
+                "pixel_values": torch.zeros(1, 3),
+                "metadata": "unchanged",
+            }
+        )
+
+        moved = _move_tensors_to_device(encoded, torch.device("meta"))
+
+        self.assertIsInstance(moved, dict)
+        self.assertEqual(moved["input_ids"].device.type, "meta")
+        self.assertEqual(moved["pixel_values"].device.type, "meta")
+        self.assertEqual(moved["metadata"], "unchanged")
 
     def test_resolves_vision_adapter_from_loaded_config_identity(self):
         standard_context = ModelAdapterContext(
@@ -317,6 +338,10 @@ class VLMInputTests(unittest.TestCase):
         generation_config = Mock(pad_token_id=None)
 
         with (
+            patch(
+                "transformers.AutoConfig.from_pretrained",
+                return_value=SimpleNamespace(),
+            ),
             patch(
                 "gpt_task.inference.inference.render_task_input",
                 return_value=RenderedTaskInput([], prepared),

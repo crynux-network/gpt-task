@@ -47,7 +47,7 @@ The project targets maximum generality while keeping scope intentionally narrow.
 
 3. Generation and streaming runtime
    - Executes model inference, streaming callbacks, finish reasons, and usage accounting.
-   - The classic executor uses the model-capability-driven `AutoProcessor.from_pretrained(...)` + `pipeline(task=None, ...)` flow.
+   - The classic executor loads the complete model config, resolves `text-generation` or `image-text-to-text` from local AutoClass/`auto_map` capability, then uses `AutoProcessor.from_pretrained(...)` + `pipeline(task=<resolved>, ...)`.
    - The tensor-parallel executor uses persistent ranks and selects `AutoModelForCausalLM` or `AutoModelForImageTextToText` from the complete config mapping.
    - Related docs:
      - `docs/streaming_design.md`

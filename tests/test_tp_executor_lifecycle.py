@@ -74,6 +74,7 @@ class TPExecutorLifecycleTests(unittest.TestCase):
             patch("torch.cuda.device_count", return_value=1),
         ):
             api.run_task_tp(
+                version="3.7.0",
                 model="test/model",
                 messages=[{"role": "user", "content": "hello"}],
                 tools=[
@@ -87,6 +88,7 @@ class TPExecutorLifecycleTests(unittest.TestCase):
                 config=Config(local_files_only=True),
             )
 
+        self.assertEqual(captured["args"].version, "3.7.0")
         self.assertEqual(captured["args"].tool_choice, "required")
         self.assertEqual(
             captured["args"].response_format,

@@ -257,6 +257,7 @@ def _resolve_tp_world_size(
 def run_task_tp(
     args: models.GPTTaskArgs | None = None,
     *,
+    version: str | None = None,
     model: str | None = None,
     messages: Sequence[models.Message | Mapping[str, Any]] | None = None,
     tools: Sequence[Dict[str, Any]] | None = None,
@@ -289,6 +290,7 @@ def run_task_tp(
         if args is None:
             args = models.GPTTaskArgs.model_validate(
                 {
+                    "version": version,
                     "model": model,
                     "messages": messages,
                     "tools": tools,

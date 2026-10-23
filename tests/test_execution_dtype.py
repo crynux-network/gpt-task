@@ -49,7 +49,7 @@ class ClassicExecutionDtypeTests(unittest.TestCase):
         pipe._forward_params = {}
         pipe._postprocess_params = {}
         pipe.return_value = [{"generated_token_ids": [1, 2, 3]}]
-        generation_config = SimpleNamespace(pad_token_id=None)
+        generation_config = SimpleNamespace(pad_token_id=None, eos_token_id=3)
         model_cache = MemoryModelCache()
 
         with (
@@ -112,7 +112,7 @@ class ClassicExecutionDtypeTests(unittest.TestCase):
         pipe._forward_params = {}
         pipe._postprocess_params = {}
         pipe.return_value = [{"generated_token_ids": [1, 2, 3]}]
-        generation_config = SimpleNamespace(pad_token_id=None)
+        generation_config = SimpleNamespace(pad_token_id=None, eos_token_id=3)
 
         with (
             patch(
@@ -164,9 +164,12 @@ class TensorParallelExecutionDtypeTests(unittest.TestCase):
         model.dtype = torch.bfloat16
         model.config = SimpleNamespace()
         model.generation_config = MagicMock()
-        model.generate.return_value = torch.tensor([[1, 2, 3]])
+        model.generate.return_value = torch.tensor([[1, 2, 4]])
         model_cache = {model_key: (model, tokenizer, None, None)}
-        generation_config = SimpleNamespace(pad_token_id=None)
+        generation_config = SimpleNamespace(
+            pad_token_id=None,
+            eos_token_id=[3, 4],
+        )
 
         with (
             patch("transformers.set_seed"),
@@ -210,6 +213,7 @@ class TensorParallelExecutionDtypeTests(unittest.TestCase):
         self.assertIsInstance(first, TPTaskResult)
         self.assertEqual(first.execution_dtype, "bfloat16")
         self.assertEqual(second.execution_dtype, "float16")
+        self.assertEqual(first.response["choices"][0]["finish_reason"], "stop")
         self.assertNotIn("execution_dtype", second.response)
         load_artifacts.assert_not_called()
 

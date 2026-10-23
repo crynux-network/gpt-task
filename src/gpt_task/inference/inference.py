@@ -30,8 +30,12 @@ from .generation_constraints import (
     constrain_generation_config,
 )
 from .input_rendering import render_task_input
-from .utils import (load_model_kwargs, resolve_generation_config,
-                    use_deterministic_mode)
+from .utils import (
+    load_model_kwargs,
+    normalize_eos_token_ids,
+    resolve_generation_config,
+    use_deterministic_mode,
+)
 from .key import generate_model_key
 from .model_adapters import ModelAdapterContext
 from .model_adapters.artifacts import configure_artifacts
@@ -45,8 +49,16 @@ _logger = logging.getLogger(__name__)
 class TokenStreamer(BaseStreamer):
     """Streamer that yields tokens as they are generated."""
 
-    def __init__(self, tokenizer, input_tokens: List[int], model_name: str, stream_callback=None):
+    def __init__(
+        self,
+        tokenizer,
+        input_tokens: List[int],
+        model_name: str,
+        eos_token_id: int | list[int] | None,
+        stream_callback=None,
+    ):
         self.tokenizer = tokenizer
+        self.eos_token_ids = normalize_eos_token_ids(eos_token_id)
         self.input_tokens = input_tokens  # Store the actual input tokens
         self.tokens = []
         self.is_eos = False
@@ -95,7 +107,7 @@ class TokenStreamer(BaseStreamer):
                                 self._send_token(new_text)
 
                             # Check for EOS in completion tokens
-                            if completion_token == self.tokenizer.eos_token_id:
+                            if completion_token in self.eos_token_ids:
                                 self.is_eos = True
                                 break
                         continue
@@ -103,7 +115,7 @@ class TokenStreamer(BaseStreamer):
             # For tokens after prompt identification
             if self.found_prompt_end:
                 # Check for EOS after we've found the prompt
-                if token == self.tokenizer.eos_token_id:
+                if token in self.eos_token_ids:
                     self.is_eos = True
                     break
 
@@ -663,7 +675,13 @@ def _run_task(
     _logger.debug(f"Input text: {inputs}")
 
     if stream_callback is not None:
-        streamer = TokenStreamer(tokenizer, input_tokens, args.model, stream_callback)
+        streamer = TokenStreamer(
+            tokenizer,
+            input_tokens,
+            args.model,
+            resolved_generation_config.eos_token_id,
+            stream_callback,
+        )
         resolved_generation_config.pad_token_id = tokenizer.eos_token_id
         resolved_generation_config.use_cache = True
 
@@ -748,13 +766,16 @@ def _run_task(
     completion_tokens = 0
     output_texts: List[str] = []
     finish_reasons = []
+    eos_token_ids = normalize_eos_token_ids(
+        resolved_generation_config.eos_token_id
+    )
 
     for generation in generations:
         token_ids = generation.get("token_ids")
         generated_text = generation.get("generated_text", "")
         if isinstance(token_ids, list):
             # when the last token is eos token, finish reason is stop, otherwise is length
-            if token_ids[-1] == tokenizer.eos_token_id:
+            if token_ids[-1] in eos_token_ids:
                 finish_reason = "stop"
             else:
                 finish_reason = "length"

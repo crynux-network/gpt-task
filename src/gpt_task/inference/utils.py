@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import os
 from collections import UserDict
-from typing import Any, Dict
+from typing import Any, Dict, FrozenSet
 
 import torch
 from pydantic import TypeAdapter
@@ -69,6 +69,14 @@ def resolve_generation_config(base_generation_config: Any, args: models.GPTTaskA
     # transformers warning.
     resolved_generation_config.max_length = None
     return resolved_generation_config
+
+
+def normalize_eos_token_ids(eos_token_id: int | list[int] | None) -> FrozenSet[int]:
+    if eos_token_id is None:
+        return frozenset()
+    if isinstance(eos_token_id, int):
+        return frozenset((eos_token_id,))
+    return frozenset(eos_token_id)
 
 
 def use_deterministic_mode():

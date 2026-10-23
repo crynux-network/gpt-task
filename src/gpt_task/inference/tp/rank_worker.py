@@ -18,6 +18,7 @@ from ..input_rendering import encode_rendered_task_input, render_task_input
 from ..model_adapters import ModelAdapterContext
 from ..model_adapters.artifacts import configure_artifacts
 from ..model_adapters.input import contains_image_blocks
+from ..utils import normalize_eos_token_ids
 from .result import TPTaskResult
 from .runtime_strategy import TPRuntimeStrategy
 
@@ -318,6 +319,7 @@ def _execute_task(
             tokenizer,
             input_tokens,
             args.model,
+            resolved_generation_config.eos_token_id,
             lambda resp: result_queue.put(("stream", seq, resp)),
         )
 
@@ -349,9 +351,12 @@ def _execute_task(
 
     completion_tokens = 0
     choices: List[models.ResponseChoice] = []
+    eos_token_ids = normalize_eos_token_ids(
+        resolved_generation_config.eos_token_id
+    )
     for i, sequence in enumerate(sequences):
         generated_tokens = sequence[prompt_tokens:]
-        if len(generated_tokens) > 0 and generated_tokens[-1] == tokenizer.eos_token_id:
+        if len(generated_tokens) > 0 and generated_tokens[-1] in eos_token_ids:
             finish_reason = "stop"
         else:
             finish_reason = "length"

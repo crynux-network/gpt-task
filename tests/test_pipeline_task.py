@@ -9,6 +9,7 @@ from transformers.models.qwen3_5_moe.configuration_qwen3_5_moe import (
 
 from gpt_task.config import Config
 from gpt_task.inference import run_task
+from gpt_task.inference.inference import TokenStreamer
 from gpt_task.inference.input_rendering import RenderedTaskInput
 from gpt_task.inference.model_adapters.runtime_strategy import (
     MODEL_LOADER_CAUSAL_LM,
@@ -98,8 +99,11 @@ class ClassicPipelineTaskWiringTests(unittest.TestCase):
         pipe._preprocess_params = {}
         pipe._forward_params = {}
         pipe._postprocess_params = {}
-        pipe.return_value = [{"generated_token_ids": [1, 2, 3]}]
-        generation_config = SimpleNamespace(pad_token_id=None)
+        pipe.return_value = [{"generated_token_ids": [1, 2, 4]}]
+        generation_config = SimpleNamespace(
+            pad_token_id=None,
+            eos_token_id=[3, 4],
+        )
         model_config = SimpleNamespace(
             auto_map={"AutoModelForCausalLM": "remote.CausalLM"}
         )
@@ -138,12 +142,13 @@ class ClassicPipelineTaskWiringTests(unittest.TestCase):
             patch("gpt_task.inference.inference.use_deterministic_mode"),
             patch("torch.cuda.device_count", return_value=1),
         ):
-            run_task(args, config=Config(local_files_only=True))
+            result = run_task(args, config=Config(local_files_only=True))
 
         load_config.assert_called_once()
         load_pipeline.assert_called_once()
         _, kwargs = load_pipeline.call_args
         self.assertEqual(kwargs["task"], "text-generation")
+        self.assertEqual(result["choices"][0]["finish_reason"], "stop")
 
     def test_classic_passes_image_text_to_text_for_vlm_mapping(self):
         args = _args()
@@ -167,7 +172,7 @@ class ClassicPipelineTaskWiringTests(unittest.TestCase):
         pipe._forward_params = {}
         pipe._postprocess_params = {}
         pipe.return_value = [{"generated_token_ids": [1, 2, 3]}]
-        generation_config = SimpleNamespace(pad_token_id=None)
+        generation_config = SimpleNamespace(pad_token_id=None, eos_token_id=3)
 
         with (
             patch(
@@ -203,6 +208,26 @@ class ClassicPipelineTaskWiringTests(unittest.TestCase):
 
         _, kwargs = load_pipeline.call_args
         self.assertEqual(kwargs["task"], "image-text-to-text")
+
+
+class TokenStreamerTests(unittest.TestCase):
+    def test_marks_any_configured_eos_token_as_stop(self):
+        responses = []
+        tokenizer = MagicMock(eos_token_id=3)
+        tokenizer.decode.return_value = ""
+        streamer = TokenStreamer(
+            tokenizer,
+            [1, 2],
+            "test/model",
+            [3, 4],
+            responses.append,
+        )
+
+        streamer.put(torch.tensor([[1, 2]]))
+        streamer.put(torch.tensor([4]))
+        streamer.end()
+
+        self.assertEqual(responses[-1]["choices"][0]["finish_reason"], "stop")
 
 
 if __name__ == "__main__":

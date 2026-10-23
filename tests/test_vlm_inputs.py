@@ -335,7 +335,7 @@ class VLMInputTests(unittest.TestCase):
         model_cache = Mock()
         model_cache.load.return_value = pipe
         prepared = {"input_ids": torch.tensor([[1, 2]])}
-        generation_config = Mock(pad_token_id=None)
+        generation_config = Mock(pad_token_id=None, eos_token_id=3)
 
         with (
             patch(

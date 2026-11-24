@@ -42,8 +42,9 @@ Usage values in each emitted chunk MUST reflect current cumulative streaming sta
 
 ## Finish-Reason Determination
 
-- `stop` MUST be emitted when generation ends on EOS.
-- `length` MUST be emitted when generation stops without EOS.
+- `stop` MUST be emitted when generation ends on an EOS token or when generated assistant text matches a configured `stop_strings` value.
+- `length` MUST be emitted when generation stops without EOS and without a `stop_strings` match.
+- When generation stops on `stop_strings`, streamed assistant deltas MUST NOT include the matched stop string.
 
 The final chunk MUST always contain a terminal `finish_reason`.
 

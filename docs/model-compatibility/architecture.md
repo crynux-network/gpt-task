@@ -186,6 +186,10 @@ Constrained generation MUST set `num_beams=1`. Multiple return sequences MUST us
 
 CUDA constrained generation MUST provide a Triton package that matches the installed PyTorch release and platform. On Linux that package MUST be the standard `triton` dependency selected by PyTorch. On Windows that package MUST be `triton-windows`. Unconstrained generation MUST NOT require Triton.
 
+When `generation_config.stop_strings` contains one or more non-empty strings after task overlay, Stage 5 MUST stop generation through a custom stopping criteria that inspects only newly generated tokens. The runtime MUST clear `GenerationConfig.stop_strings` before calling `model.generate` or a pipeline so Transformers built-in stop-string preprocessing is not used. Empty strings MUST be ignored. An empty effective stop-string list MUST leave generation behavior unchanged.
+
+Classic text pipeline, multimodal `model.generate`, direct streaming, and every TP rank MUST receive the same effective stop-string criteria. The criteria MUST NOT match stop strings that appear only in the prompt suffix. All TP ranks MUST evaluate the same stop decision on the same step.
+
 ### Classic Execution
 
 Classic execution MUST invoke the pipeline or model with the rendered text or multimodal tensors.
@@ -217,6 +221,8 @@ Non-streaming output MUST contain one choice per generated sequence with:
 - prompt, completion, and total token usage.
 
 Direct streaming MUST emit decoded raw assistant deltas, cumulative usage, and one terminal finish reason.
+
+When generation stops because generated assistant text matches a configured `stop_strings` value, Stage 6 MUST truncate the decoded text at the earliest matching stop-string start position, MUST NOT include that matched stop string in `content` or streamed deltas, and MUST set `finish_reason="stop"`. Truncation MUST NOT remove thinking or protocol text that appears before the matched stop string. Completion token counts MUST include tokens that were actually generated, including tokens that formed the matched stop string.
 
 Decoding MUST preserve generated thinking, final text, and tool-call syntax. gpt-task MUST NOT strip reasoning, parse output-format protocols, create OpenAI tool calls, or change finish reason to `tool_calls`.
 

@@ -9,7 +9,7 @@ from transformers.models.qwen3_5_moe.configuration_qwen3_5_moe import (
 
 from gpt_task.config import Config
 from gpt_task.inference import run_task
-from gpt_task.inference.inference import TokenStreamer
+from gpt_task.inference.inference import TokenStreamer, _invoke_pipeline
 from gpt_task.inference.input_rendering import RenderedTaskInput
 from gpt_task.inference.model_adapters.runtime_strategy import (
     MODEL_LOADER_CAUSAL_LM,
@@ -208,6 +208,37 @@ class ClassicPipelineTaskWiringTests(unittest.TestCase):
 
         _, kwargs = load_pipeline.call_args
         self.assertEqual(kwargs["task"], "image-text-to-text")
+
+    def test_invoke_pipeline_forwards_stopping_criteria_by_pipeline_type(self):
+        criteria = object()
+        text_pipe = MagicMock(task="text-generation", generation_config="saved")
+        _invoke_pipeline(
+            text_pipe,
+            "prompt",
+            "resolved",
+            stopping_criteria=criteria,
+        )
+        text_pipe.assert_called_once_with(
+            "prompt",
+            stopping_criteria=criteria,
+        )
+        self.assertEqual(text_pipe.generation_config, "saved")
+
+        vlm_pipe = MagicMock(
+            task="image-text-to-text",
+            generation_config="saved",
+        )
+        _invoke_pipeline(
+            vlm_pipe,
+            "prompt",
+            "resolved",
+            stopping_criteria=criteria,
+        )
+        vlm_pipe.assert_called_once_with(
+            "prompt",
+            generate_kwargs={"stopping_criteria": criteria},
+        )
+        self.assertEqual(vlm_pipe.generation_config, "saved")
 
 
 class TokenStreamerTests(unittest.TestCase):

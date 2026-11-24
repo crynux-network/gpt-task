@@ -36,6 +36,15 @@ from .utils import (
     resolve_generation_config,
     use_deterministic_mode,
 )
+from .stop_strings import (
+    build_stop_string_criteria,
+    compute_stream_safe_prefix_len,
+    decode_and_truncate,
+    extract_and_clear_stop_strings,
+    finish_reason_for_generation,
+    normalize_stop_strings,
+    truncate_at_stop_strings,
+)
 from .key import generate_model_key
 from .model_adapters import ModelAdapterContext
 from .model_adapters.artifacts import configure_artifacts
@@ -56,12 +65,14 @@ class TokenStreamer(BaseStreamer):
         model_name: str,
         eos_token_id: int | list[int] | None,
         stream_callback=None,
+        stop_strings: Sequence[str] | None = None,
     ):
         self.tokenizer = tokenizer
         self.eos_token_ids = normalize_eos_token_ids(eos_token_id)
         self.input_tokens = input_tokens  # Store the actual input tokens
         self.tokens = []
         self.is_eos = False
+        self.is_stop_string = False
         self.completion_tokens = 0
         self.is_done = False
         self.text_queue = []
@@ -70,6 +81,9 @@ class TokenStreamer(BaseStreamer):
         self.prompt_tokens = len(input_tokens)  # Initialize with input length, will be updated when prompt end is found
         self.model_name = model_name
         self.stream_callback = stream_callback  # Callback to send stream responses
+        self.stop_strings = normalize_stop_strings(stop_strings)
+        self.emitted_char_len = 0
+        self._decoded_text = ""
 
     def put(self, value):
         if len(value.shape) > 1:
@@ -78,6 +92,9 @@ class TokenStreamer(BaseStreamer):
         token_list = value.tolist()
 
         for token in token_list:
+            if self.is_eos or self.is_stop_string:
+                break
+
             self.tokens.append(token)
 
             # Always check for prompt end first
@@ -92,19 +109,23 @@ class TokenStreamer(BaseStreamer):
                         _logger.debug(f"Found prompt end at position {prompt_end}")
 
                         # Check if we've already collected any completion tokens
-                        for completion_token in self.tokens:
+                        for completion_token in list(self.tokens):
+                            if self.is_eos or self.is_stop_string:
+                                break
                             self.completion_tokens += 1
-                            # Process each completion token (decode, etc.)
-                            new_text = self.tokenizer.decode(
-                                [completion_token],
-                                skip_special_tokens=True,
-                                clean_up_tokenization_spaces=True
-                            )
-                            if new_text and self.stream_callback:
-                                if self.first_token:
-                                    new_text = new_text.lstrip()
-                                    self.first_token = False
-                                self._send_token(new_text)
+                            if self.stop_strings:
+                                self._emit_with_stop_buffer()
+                            else:
+                                new_text = self.tokenizer.decode(
+                                    [completion_token],
+                                    skip_special_tokens=True,
+                                    clean_up_tokenization_spaces=True
+                                )
+                                if new_text and self.stream_callback:
+                                    if self.first_token:
+                                        new_text = new_text.lstrip()
+                                        self.first_token = False
+                                    self._send_token(new_text)
 
                             # Check for EOS in completion tokens
                             if completion_token in self.eos_token_ids:
@@ -120,6 +141,9 @@ class TokenStreamer(BaseStreamer):
                     break
 
                 self.completion_tokens += 1
+                if self.stop_strings:
+                    self._emit_with_stop_buffer()
+                    continue
 
                 # Decode the new token
                 new_text = self.tokenizer.decode(
@@ -132,6 +156,33 @@ class TokenStreamer(BaseStreamer):
                         new_text = new_text.lstrip()
                         self.first_token = False
                     self._send_token(new_text)
+
+    def _emit_with_stop_buffer(self) -> None:
+        raw_text = self.tokenizer.decode(
+            self.tokens,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True,
+        )
+        self._decoded_text = raw_text
+
+        truncated, matched = truncate_at_stop_strings(
+            raw_text, self.stop_strings
+        )
+        if matched:
+            display_text = truncated.lstrip()
+            if len(display_text) > self.emitted_char_len and self.stream_callback:
+                self._send_token(display_text[self.emitted_char_len :])
+            self.emitted_char_len = len(display_text)
+            self.is_stop_string = True
+            return
+
+        safe_raw_len = compute_stream_safe_prefix_len(
+            raw_text, self.stop_strings
+        )
+        safe_display = raw_text[:safe_raw_len].lstrip()
+        if len(safe_display) > self.emitted_char_len and self.stream_callback:
+            self._send_token(safe_display[self.emitted_char_len :])
+            self.emitted_char_len = len(safe_display)
 
     def _send_token(self, text):
         """Send a token through the callback."""
@@ -150,6 +201,16 @@ class TokenStreamer(BaseStreamer):
     def end(self):
         """Called when generation is complete."""
         self.is_done = True
+        if (
+            self.stream_callback
+            and self.stop_strings
+            and not self.is_stop_string
+            and self._decoded_text
+        ):
+            display_text = self._decoded_text.lstrip()
+            if len(display_text) > self.emitted_char_len:
+                self._send_token(display_text[self.emitted_char_len :])
+                self.emitted_char_len = len(display_text)
         # Send final chunk with finish_reason
         if self.stream_callback:
             finish_reason = self.get_finish_reason()
@@ -167,7 +228,7 @@ class TokenStreamer(BaseStreamer):
             self.stream_callback(response)
 
     def get_finish_reason(self) -> Literal["stop", "length"]:
-        return "stop" if self.is_eos else "length"
+        return "stop" if (self.is_eos or self.is_stop_string) else "length"
 
     def get_usage(self) -> models.Usage:
         return {
@@ -293,6 +354,7 @@ def _invoke_pipeline(
     return_tensors: bool = False,
     streamer: BaseStreamer | None = None,
     logits_processor: List[Any] | None = None,
+    stopping_criteria: Any | None = None,
 ) -> Any:
     call_kwargs: Dict[str, Any] = {}
     if return_tensors:
@@ -325,6 +387,11 @@ def _invoke_pipeline(
                 generate_kwargs["logits_processor"] = logits_processor
             else:
                 call_kwargs["logits_processor"] = logits_processor
+        if stopping_criteria is not None:
+            if _is_vlm_pipeline(pipe):
+                generate_kwargs["stopping_criteria"] = stopping_criteria
+            else:
+                call_kwargs["stopping_criteria"] = stopping_criteria
         if generate_kwargs:
             call_kwargs["generate_kwargs"] = generate_kwargs
         return pipe(inputs, **call_kwargs)
@@ -671,6 +738,28 @@ def _run_task(
             args.messages,
         )
 
+    stop_strings = extract_and_clear_stop_strings(resolved_generation_config)
+    if encoded_vlm is not None:
+        vlm_prompt_len = None
+        vlm_input_ids = encoded_vlm.get("input_ids")
+        if torch.is_tensor(vlm_input_ids):
+            vlm_prompt_len = int(vlm_input_ids.shape[-1])
+        elif isinstance(vlm_input_ids, list) and vlm_input_ids:
+            first = vlm_input_ids[0]
+            vlm_prompt_len = (
+                len(first) if isinstance(first, list) else len(vlm_input_ids)
+            )
+        stopping_criteria = build_stop_string_criteria(
+            tokenizer,
+            stop_strings,
+            initial_prompt_len=vlm_prompt_len,
+        )
+    else:
+        stopping_criteria = build_stop_string_criteria(
+            tokenizer,
+            stop_strings,
+        )
+
     _logger.debug(f"Generation config: {resolved_generation_config}")
     _logger.debug(f"Input text: {inputs}")
 
@@ -681,6 +770,7 @@ def _run_task(
             args.model,
             resolved_generation_config.eos_token_id,
             stream_callback,
+            stop_strings=stop_strings,
         )
         resolved_generation_config.pad_token_id = tokenizer.eos_token_id
         resolved_generation_config.use_cache = True
@@ -692,6 +782,7 @@ def _run_task(
                     generation_config=resolved_generation_config,
                     streamer=streamer,
                     logits_processor=logits_processors,
+                    stopping_criteria=stopping_criteria,
                 )
         else:
             _invoke_pipeline(
@@ -700,6 +791,7 @@ def _run_task(
                 resolved_generation_config,
                 streamer=streamer,
                 logits_processor=logits_processors,
+                stopping_criteria=stopping_criteria,
             )
 
         if torch.cuda.is_available():
@@ -719,6 +811,7 @@ def _run_task(
                 **encoded_vlm,
                 generation_config=resolved_generation_config,
                 logits_processor=logits_processors,
+                stopping_criteria=stopping_criteria,
             )
         _logger.debug(f"Raw output: {output}")
         for sequence in output.tolist():
@@ -735,6 +828,7 @@ def _run_task(
             resolved_generation_config,
             return_tensors=True,
             logits_processor=logits_processors,
+            stopping_criteria=stopping_criteria,
         )
         assert output is not None
         assert isinstance(output, list)
@@ -774,28 +868,31 @@ def _run_task(
         token_ids = generation.get("token_ids")
         generated_text = generation.get("generated_text", "")
         if isinstance(token_ids, list):
-            # when the last token is eos token, finish reason is stop, otherwise is length
-            if token_ids[-1] in eos_token_ids:
-                finish_reason = "stop"
-            else:
-                finish_reason = "length"
+            generated_tokens = token_ids[prompt_tokens:]
+            text, matched_stop = decode_and_truncate(
+                tokenizer,
+                generated_tokens,
+                stop_strings,
+            )
+            finish_reason = finish_reason_for_generation(
+                generated_tokens,
+                eos_token_ids,
+                matched_stop,
+            )
             finish_reasons.append(finish_reason)
 
             completion_tokens += max(len(token_ids) - prompt_tokens, 0)
 
-            text = tokenizer.decode(
-                token_ids[prompt_tokens:],
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=True,
-            ).strip()
-
             output_texts.append(text)
         else:
-            finish_reasons.append("length")
+            text, matched_stop = truncate_at_stop_strings(
+                generated_text, stop_strings
+            )
+            finish_reasons.append("stop" if matched_stop else "length")
             completion_tokens += len(
                 tokenizer.encode(generated_text, add_special_tokens=False)
             )
-            output_texts.append(generated_text.strip())
+            output_texts.append(text.strip())
 
     usage: models.Usage = {
         "prompt_tokens": prompt_tokens,

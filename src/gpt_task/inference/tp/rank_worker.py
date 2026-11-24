@@ -18,6 +18,12 @@ from ..input_rendering import encode_rendered_task_input, render_task_input
 from ..model_adapters import ModelAdapterContext
 from ..model_adapters.artifacts import configure_artifacts
 from ..model_adapters.input import contains_image_blocks
+from ..stop_strings import (
+    build_stop_string_criteria,
+    decode_and_truncate,
+    extract_and_clear_stop_strings,
+    finish_reason_for_generation,
+)
 from ..utils import normalize_eos_token_ids
 from .result import TPTaskResult
 from .runtime_strategy import TPRuntimeStrategy
@@ -285,6 +291,7 @@ def _execute_task(
     resolved_generation_config = resolve_generation_config(
         model.generation_config, args
     )
+    stop_strings = extract_and_clear_stop_strings(resolved_generation_config)
     logits_processors = build_generation_logits_processors(
         ModelAdapterContext(
             config=model.config,
@@ -312,6 +319,11 @@ def _execute_task(
         torch.device(f"cuda:{rank}"),
     )
     input_tokens: List[int] = encoded["input_ids"][0].tolist()
+    stopping_criteria = build_stop_string_criteria(
+        tokenizer,
+        stop_strings,
+        initial_prompt_len=len(input_tokens),
+    )
 
     streamer = None
     if stream and rank == 0:
@@ -321,6 +333,7 @@ def _execute_task(
             args.model,
             resolved_generation_config.eos_token_id,
             lambda resp: result_queue.put(("stream", seq, resp)),
+            stop_strings=stop_strings,
         )
 
     with torch.no_grad():
@@ -329,6 +342,7 @@ def _execute_task(
             generation_config=resolved_generation_config,
             streamer=streamer,
             logits_processor=logits_processors,
+            stopping_criteria=stopping_criteria,
         )
 
     if rank != 0:
@@ -356,16 +370,17 @@ def _execute_task(
     )
     for i, sequence in enumerate(sequences):
         generated_tokens = sequence[prompt_tokens:]
-        if len(generated_tokens) > 0 and generated_tokens[-1] in eos_token_ids:
-            finish_reason = "stop"
-        else:
-            finish_reason = "length"
-        completion_tokens += len(generated_tokens)
-        text = tokenizer.decode(
+        text, matched_stop = decode_and_truncate(
+            tokenizer,
             generated_tokens,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=True,
-        ).strip()
+            stop_strings,
+        )
+        finish_reason = finish_reason_for_generation(
+            generated_tokens,
+            eos_token_ids,
+            matched_stop,
+        )
+        completion_tokens += len(generated_tokens)
         choices.append(
             {
                 "finish_reason": finish_reason,

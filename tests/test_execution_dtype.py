@@ -217,6 +217,88 @@ class TensorParallelExecutionDtypeTests(unittest.TestCase):
         self.assertNotIn("execution_dtype", second.response)
         load_artifacts.assert_not_called()
 
+    def test_all_ranks_receive_stop_criteria_and_rank0_truncates(self):
+        args = _args().model_copy(
+            update={
+                "generation_config": {
+                    "max_new_tokens": 16,
+                    "stop_strings": ["STOP"],
+                }
+            }
+        )
+        strategy = TPRuntimeStrategy(TP_MODEL_LOADER_CAUSAL_LM, False)
+        model_key = (
+            f"{strategy!r}:"
+            f"{generate_model_key(args, executor_mode='tensor_parallel')}"
+        )
+        tokenizer = MagicMock(eos_token_id=3)
+        tokenizer.decode.return_value = "answer STOP trailing"
+        model = MagicMock()
+        model.dtype = torch.bfloat16
+        model.config = SimpleNamespace()
+        model.generation_config = MagicMock()
+        model.generate.return_value = torch.tensor([[1, 2, 5, 6]])
+        model_cache_r0 = {model_key: (model, tokenizer, None, None)}
+        model_cache_r1 = {model_key: (model, tokenizer, None, None)}
+
+        with (
+            patch("transformers.set_seed"),
+            patch("gpt_task.inference.utils.use_deterministic_mode"),
+            patch(
+                "gpt_task.inference.utils.resolve_generation_config",
+                side_effect=lambda *_a, **_kw: SimpleNamespace(
+                    pad_token_id=None,
+                    eos_token_id=3,
+                    stop_strings=["STOP"],
+                ),
+            ),
+            patch(
+                "gpt_task.inference.tp.rank_worker._prepare_task_inputs",
+                return_value={"input_ids": torch.tensor([[1, 2]])},
+            ),
+        ):
+            rank0_res = _execute_task(
+                0,
+                2,
+                1,
+                strategy,
+                args,
+                Config(),
+                False,
+                MagicMock(),
+                model_cache_r0,
+            )
+            rank1_res = _execute_task(
+                1,
+                2,
+                1,
+                strategy,
+                args,
+                Config(),
+                False,
+                MagicMock(),
+                model_cache_r1,
+            )
+
+        self.assertIsNone(rank1_res)
+        self.assertEqual(model.generate.call_count, 2)
+        for call in model.generate.call_args_list:
+            gen_cfg = call.kwargs["generation_config"]
+            criteria = call.kwargs["stopping_criteria"]
+            self.assertIsNone(gen_cfg.stop_strings)
+            self.assertIsNotNone(criteria)
+            self.assertEqual(criteria[0]._prompt_len, 2)
+
+        self.assertEqual(
+            rank0_res.response["choices"][0]["finish_reason"],
+            "stop",
+        )
+        self.assertEqual(
+            rank0_res.response["choices"][0]["message"]["content"],
+            "answer",
+        )
+        self.assertEqual(rank0_res.response["usage"]["completion_tokens"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

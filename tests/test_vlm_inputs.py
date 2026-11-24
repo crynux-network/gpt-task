@@ -362,6 +362,69 @@ class VLMInputTests(unittest.TestCase):
         model.generate.assert_called_once()
         self.assertEqual(result["choices"][0]["message"]["content"], "answer")
 
+    def test_classic_image_vlm_applies_stop_strings_criteria_and_truncates(self):
+        args = GPTTaskArgs(
+            version="3.7.0",
+            model="test/model",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "base64": "aQ=="},
+                    ],
+                }
+            ],
+            generation_config={"max_new_tokens": 16, "stop_strings": ["STOP"]},
+        )
+        processor = Mock()
+        tokenizer = Mock()
+        tokenizer.eos_token_id = 3
+        tokenizer.decode.return_value = "answer STOP extra"
+        model = Mock()
+        model.dtype = torch.float16
+        model.device = torch.device("cpu")
+        model.generation_config = Mock()
+        model.generate.return_value = torch.tensor([[1, 2, 5, 6]])
+        pipe = Mock(processor=processor, tokenizer=tokenizer, model=model)
+        model_cache = Mock()
+        model_cache.load.return_value = pipe
+        prepared = {"input_ids": torch.tensor([[1, 2]])}
+        generation_config = SimpleNamespace(
+            pad_token_id=None,
+            eos_token_id=3,
+            stop_strings=["STOP"],
+        )
+
+        with (
+            patch(
+                "transformers.AutoConfig.from_pretrained",
+                return_value=SimpleNamespace(),
+            ),
+            patch(
+                "gpt_task.inference.inference.render_task_input",
+                return_value=RenderedTaskInput([], prepared),
+            ),
+            patch(
+                "gpt_task.inference.inference.resolve_generation_config",
+                return_value=generation_config,
+            ),
+            patch("gpt_task.inference.inference.use_deterministic_mode"),
+        ):
+            result = _run_task(
+                args,
+                config=Config(),
+                model_cache=model_cache,
+            )
+
+        self.assertIsNone(generation_config.stop_strings)
+        _, generate_kwargs = model.generate.call_args
+        criteria = generate_kwargs["stopping_criteria"]
+        self.assertIsNotNone(criteria)
+        self.assertEqual(criteria[0]._prompt_len, 2)
+        self.assertEqual(result["choices"][0]["finish_reason"], "stop")
+        self.assertEqual(result["choices"][0]["message"]["content"], "answer")
+        self.assertEqual(result["usage"]["completion_tokens"], 2)
+
     def test_custom_vision_processor_uses_image_urls_and_supported_template_args(self):
         class CustomProcessor:
             def apply_chat_template(
